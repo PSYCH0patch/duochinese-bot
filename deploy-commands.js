@@ -73,6 +73,17 @@ const commands = [
         )
         .setRequired(true)),
   new SlashCommandBuilder().setName('weekly').setDescription('📊 Rangkuman belajar minggu ini'),
+
+  new SlashCommandBuilder().setName('notif')
+    .setDescription('🔔 Atur notifikasi proaktif dari bot')
+    .addStringOption(opt =>
+      opt.setName('action').setDescription('Aktifkan atau matikan notifikasi')
+        .addChoices(
+          { name: '🔔 Aktifkan di channel ini', value: 'on' },
+          { name: '🔕 Matikan notifikasi', value: 'off' },
+          { name: '📋 Cek status', value: 'status' },
+        )
+        .setRequired(false)),
 ].map(cmd => cmd.toJSON());
 
 const rest = new REST({ version: '10' }).setToken(process.env.BOT_TOKEN);

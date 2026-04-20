@@ -131,7 +131,7 @@ function loadData(relPath) {
     check('DB has >= 1 user', users >= 1, `got ${users}`);
 
     const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map(r => r.name);
-    const requiredTables = ['users', 'user_words', 'user_badges', 'user_lessons', 'user_challenges', 'battles', 'words', 'server_xp', 'daily_logins', 'purchases', 'weekly_stats'];
+    const requiredTables = ['users', 'user_words', 'user_badges', 'user_lessons', 'user_challenges', 'battles', 'words', 'server_xp', 'daily_logins', 'purchases', 'weekly_stats', 'notifications'];
     for (const t of requiredTables) {
       check(`Table exists: ${t}`, tables.includes(t));
     }
@@ -170,7 +170,7 @@ function loadData(relPath) {
     'katahariini','skillmap','grammar','challenge','tonetrain','susun','battle',
     'kamus','reminder','daily','tebakemoji','wordsearch','speedround',
     'setuproles','syncroles','dbstats','botinfo','adminuser',
-    'shop','buy','weekly'
+    'shop','buy','weekly','notif'
   ];
 
   for (const r of routes) {
@@ -183,7 +183,7 @@ function loadData(relPath) {
     const rest = new REST({ version: '10' }).setToken(process.env.BOT_TOKEN);
     const cmds = await rest.get(Routes.applicationCommands(process.env.CLIENT_ID));
     const names = cmds.map(c => c.name);
-    check('Global commands count = 29', names.length === 29, `got ${names.length}`);
+    check('Global commands count = 30', names.length === 30, `got ${names.length}`);
     for (const r of routes) {
       check(`Global cmd: ${r}`, names.includes(r));
     }
@@ -223,6 +223,7 @@ function loadData(relPath) {
   check('UAT.md exists', fs.existsSync(path.join(__dirname, '../UAT.md')));
   check('roleSync.js exists', fs.existsSync(path.join(__dirname, '../utils/roleSync.js')));
   check('backup.js exists', fs.existsSync(path.join(__dirname, '../utils/backup.js')));
+  check('notifier.js exists', fs.existsSync(path.join(__dirname, '../utils/notifier.js')));
 
   console.log('\n======================================');
   for (const line of results) console.log(line);

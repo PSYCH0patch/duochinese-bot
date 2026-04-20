@@ -48,6 +48,7 @@ const allChallengesN = allChallenges.map(normalizeChallenge);
 const allTonesN     = allTones.map(normalizeTone);
 
 const { shuffle, getLevel, xpBar, heartsDisplay, similarity, todayStr, generateWordSearchGrid, renderGrid, getWeakWords, getReviewWords, nextReviewDate, getDailyReward } = require('./utils/helpers');
+const { runNotifications, sendNotif } = require('./utils/notifier');
 const { SHOP_ITEMS } = require('./config/shop');
 const { ensureRoles, syncRole, syncAllRoles } = require('./utils/roleSync');
 
@@ -156,6 +157,23 @@ function checkAndAwardBadges(userId) {
   check('all_done',(user.lessons_completed||0)>=allLessonsN.length);
   check('review_master',(user.total_reviews||0)>=100);
   check('comeback',(user.streak||0)===1&&(user.max_streak||0)>=3);
+
+  // Send badge notifications
+  if (newBadges.length > 0) {
+    const user = db.prepare('SELECT notif_channel, notif_enabled FROM users WHERE user_id=?').get(userId);
+    if (user && user.notif_channel && user.notif_enabled) {
+      const badgeNames = newBadges.map(id => {
+        const b = allBadges.find(bg => bg.id === id);
+        return b ? b.emoji + ' **' + b.nama + '**' : id;
+      }).join('\n');
+      sendNotif(client, userId, user.notif_channel, new EmbedBuilder()
+        .setColor(0xf39c12)
+        .setTitle('🏅 Badge Baru!')
+        .setDescription('Kamu mendapatkan badge baru!\n\n' + badgeNames)
+        .setFooter({ text: 'DuoChinese • Achievement unlocked!' })
+      ).catch(() => {});
+    }
+  }
   return newBadges;
 }
 
@@ -211,7 +229,21 @@ async function finishSession(userId, session, interaction) {
     if (hearts===0&&pct>=60) awardBadge(userId,'survivor');
   }
   if ((db.prepare('SELECT total_reviews FROM users WHERE user_id=?').get(userId).total_reviews||0)>=100) awardBadge(userId,'review_master');
-  const newBadges=checkAndAwardBadges(userId);
+  
+  // Level up notification
+  const prevLevel = session._prevLevel || 0;
+  const newUserData = db.prepare('SELECT level, notif_channel, notif_enabled FROM users WHERE user_id=?').get(userId);
+  if (newUserData && prevLevel > 0 && newUserData.level > prevLevel && newUserData.notif_channel && newUserData.notif_enabled) {
+    const lvlInfo = getLevel(newUserData.xp || 0);
+    sendNotif(client, userId, newUserData.notif_channel, new EmbedBuilder()
+      .setColor(0xf1c40f)
+      .setTitle('🎉 Level Naik!')
+      .setDescription('Selamat! Kamu naik ke **' + lvlInfo.nama + '**!\n\nTerus semangat belajar! 🚀')
+      .setFooter({ text: 'DuoChinese • Level up!' })
+    ).catch(() => {});
+  }
+
+const newBadges=checkAndAwardBadges(userId);
   const title=pct===100?'🌟 PERFECT!':pct>=80?'🎉 Hebat!':pct>=60?'👍 Bagus!':'😅 Coba lagi!';
   const label=isReview?'Review':isTone?'Tone Training':isEmoji?'Tebak Emoji':'Lesson';
   const embed=new EmbedBuilder().setColor(pct>=60?0x2ecc71:0xe74c3c).setTitle(`${title} — ${label} Selesai!`)
@@ -925,6 +957,54 @@ async function handleAdminUser(interaction) {
   await interaction.reply({ embeds: [embed], ephemeral: true });
 }
 
+
+async function handleNotif(interaction) {
+  const userId = interaction.user.id;
+  ensureUser(userId, interaction.user.username);
+
+  const action = interaction.options?.getString('action') || 'status';
+
+  if (action === 'on') {
+    db.prepare('UPDATE users SET notif_channel = ?, notif_enabled = 1 WHERE user_id = ?')
+      .run(interaction.channelId, userId);
+    return interaction.reply({
+      content: '🔔 Notifikasi **diaktifkan** di channel ini!\n\nKamu akan mendapat notif untuk:\n• 📚 Review queue menumpuk\n• 🔥 Streak terancam putus\n• ⚡ Double XP hampir habis\n• ❤️ Nyawa sudah penuh',
+      ephemeral: true
+    });
+  }
+
+  if (action === 'off') {
+    db.prepare("UPDATE users SET notif_enabled = 0 WHERE user_id = ?").run(userId);
+    return interaction.reply({ content: '🔕 Notifikasi **dimatikan**.', ephemeral: true });
+  }
+
+  // Status
+  const user = db.prepare('SELECT * FROM users WHERE user_id = ?').get(userId);
+  const enabled = user.notif_enabled !== 0;
+  const channel = user.notif_channel;
+
+  const recentNotifs = db.prepare(
+    "SELECT type, sent_at FROM notifications WHERE user_id = ? ORDER BY sent_at DESC LIMIT 5"
+  ).all(userId);
+
+  const notifList = recentNotifs.length > 0
+    ? recentNotifs.map(n => '• ' + n.type + ' — ' + n.sent_at.split('T')[0]).join('\n')
+    : 'Belum ada notifikasi';
+
+  await interaction.reply({
+    ephemeral: true,
+    embeds: [new EmbedBuilder()
+      .setColor(enabled ? 0x2ecc71 : 0x95a5a6)
+      .setTitle('🔔 Status Notifikasi')
+      .addFields(
+        { name: 'Status', value: enabled ? '✅ Aktif' : '❌ Nonaktif', inline: true },
+        { name: 'Channel', value: channel ? '<#' + channel + '>' : 'Belum diset', inline: true },
+        { name: '📋 Notif Terakhir', value: notifList, inline: false },
+        { name: '💡 Cara atur', value: '/notif action:on — aktifkan\n/notif action:off — matikan', inline: false },
+      )]
+  });
+}
+
 async function handleButton(interaction) {
   const userId=interaction.user.id; const cid=interaction.customId;
   if (cid==='susun_answer') {
@@ -1131,6 +1211,15 @@ client.once('clientReady', () => {
   setInterval(() => {
     cleanupStaleMaps();
   }, 5 * 60 * 1000);
+
+  setInterval(() => {
+    runNotifications(client, db).catch(err => console.error('Notif error:', err));
+  }, 5 * 60 * 1000);
+
+  // Run once on startup too
+  setTimeout(() => {
+    runNotifications(client, db).catch(() => {});
+  }, 10000);
 });
 
 client.on('interactionCreate', async (interaction) => {
@@ -1143,7 +1232,7 @@ client.on('interactionCreate', async (interaction) => {
         skillmap:handleSkillmap, grammar:handleGrammar, challenge:handleChallenge,
         tonetrain:handleToneTrain, susun:handleSusun, battle:handleBattle,
         kamus:handleKamus, reminder:handleReminder, daily:handleDaily,
-        tebakemoji:handleTebakEmoji, wordsearch:handleWordSearch, speedround:handleSpeedRound, setuproles:handleSetupRoles, syncroles:handleSyncRoles, shop:handleShop, buy:handleBuy, weekly:handleWeekly, dbstats:handleDbStats, botinfo:handleBotInfo, adminuser:handleAdminUser,
+        tebakemoji:handleTebakEmoji, wordsearch:handleWordSearch, speedround:handleSpeedRound, setuproles:handleSetupRoles, syncroles:handleSyncRoles, shop:handleShop, buy:handleBuy, weekly:handleWeekly, notif:handleNotif, dbstats:handleDbStats, botinfo:handleBotInfo, adminuser:handleAdminUser,
       };
       return handlers[interaction.commandName]?.(interaction);
     }
