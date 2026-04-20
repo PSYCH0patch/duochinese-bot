@@ -197,6 +197,33 @@ async function finishSession(userId, session, interaction) {
   return interaction.update({embeds:[embed],components:[]});
 }
 
+
+function getAdaptiveReviewQueue(userId, limit=8) {
+  const dueRows = getReviewWords(db, userId, limit);
+  const weakRows = getWeakWords(db, userId, limit * 2);
+  const seen = new Set();
+  const words = [];
+
+  for (const row of [...dueRows, ...weakRows]) {
+    const wordId = row.word_id;
+    if (!wordId || seen.has(wordId)) continue;
+    const word = allWords.find(w => w.id === wordId);
+    if (!word) continue;
+    seen.add(wordId);
+    words.push(word);
+    if (words.length >= limit) break;
+  }
+
+  const dueIds = new Set(dueRows.map(r => r.word_id));
+  const weakMixed = words.filter(w => !dueIds.has(w.id)).length;
+
+  return {
+    words,
+    dueCount: Math.min(dueRows.length, words.length),
+    weakMixed
+  };
+}
+
 async function handleMulai(interaction) {
   const userId=interaction.user.id;
   ensureUser(userId,interaction.user.username); updateStreak(userId);
@@ -228,18 +255,48 @@ async function handleLanjut(interaction) {
   await interaction.reply({embeds:[embed],components:[row]});
 }
 
+
 async function handleReview(interaction) {
   const userId=interaction.user.id;
-  ensureUser(userId,interaction.user.username); updateStreak(userId);
-  const due=getReviewWords(db,userId,5);
-  const wordObjs=(due.length>0?due:getWeakWords(db,userId,5)).map(r=>allWords.find(w=>w.id===r.word_id)).filter(Boolean);
-  if (!wordObjs.length) return interaction.reply({content:'✅ Tidak ada kata yang perlu di-review! /lanjut untuk belajar.',ephemeral:true});
-  const qs=wordObjs.map(w=>generateQuestion(w,allWords));
-  sessions.set(userId,{lessonId:'review',questions:qs,current:0,score:0,startTime:Date.now(),guildId:interaction.guildId,isReview:true});
-  const hearts=checkHearts(userId);
-  const {embed,row}=buildUI(qs[0],1,qs.length,hearts,due.length>0?'🔄 Review SRS':'🧠 Review Lemah');
-  await interaction.reply({embeds:[embed],components:[row]});
+  ensureUser(userId,interaction.user.username);
+  updateStreak(userId);
+
+  const adaptive = getAdaptiveReviewQueue(userId, 8);
+  if (!adaptive.words.length) {
+    return interaction.reply({
+      content:'✅ Tidak ada kata yang perlu di-review sekarang! Gunakan /lanjut untuk belajar.',
+      ephemeral:true
+    });
+  }
+
+  const qs = adaptive.words.map(w => generateQuestion(w, allWords));
+  sessions.set(userId,{
+    lessonId:'review',
+    questions:qs,
+    current:0,
+    score:0,
+    startTime:Date.now(),
+    guildId:interaction.guildId,
+    isReview:true
+  });
+
+  const hearts = checkHearts(userId);
+
+  let label = '🧠 Review Lemah';
+  if (adaptive.dueCount > 0 && adaptive.weakMixed > 0) label = '🔄 Review Campuran';
+  else if (adaptive.dueCount > 0) label = '🔄 Review SRS';
+
+  const ui = buildUI(qs[0], 1, qs.length, hearts, label);
+  ui.embed.addFields({
+    name:'Queue',
+    value:'Due: ' + adaptive.dueCount + ' • Lemah: ' + adaptive.weakMixed,
+    inline:false
+  });
+
+  await interaction.reply({ embeds:[ui.embed], components:[ui.row] });
 }
+
+
 
 async function handleProfil(interaction) {
   const userId=interaction.user.id;
@@ -249,32 +306,72 @@ async function handleProfil(interaction) {
   const badgeCount=db.prepare('SELECT COUNT(*) as c FROM user_badges WHERE user_id=?').get(userId).c;
   const hearts=checkHearts(userId);
   const curLesson=allLessonsN.find(l=>l.id===(user.current_lesson||1))||allLessonsN[0];
-  await interaction.reply({embeds:[new EmbedBuilder().setColor(0x2ecc71).setTitle(`👤 Profil ${interaction.user.username}`).setThumbnail(interaction.user.displayAvatarURL())
+
+  const dueNow = db.prepare('SELECT COUNT(*) as c FROM user_words WHERE user_id = ? AND next_review <= ?').get(userId, new Date().toISOString()).c;
+  const weakFocus = getWeakWords(db, userId, 3);
+
+  const embed = new EmbedBuilder()
+    .setColor(0x2ecc71)
+    .setTitle('👤 Profil ' + interaction.user.username)
+    .setThumbnail(interaction.user.displayAvatarURL())
     .addFields(
-      {name:'📊 Level',value:`${lvl.nama}\nXP: ${user.xp||0}${lvl.next?`/${lvl.next}`:' MAX'}\n${xpBar(user.xp||0,lvl.next)}`},
+      {name:'📊 Level',value:lvl.nama + '\nXP: ' + (user.xp||0) + (lvl.next ? '/' + lvl.next : ' MAX') + '\n' + xpBar(user.xp||0,lvl.next)},
       {name:'❤️ Nyawa',value:heartsDisplay(hearts),inline:true},
-      {name:'🔥 Streak',value:`${user.streak||0} hari (Max: ${user.max_streak||0})`,inline:true},
-      {name:'📚 Progress',value:`Lesson: ${user.lessons_completed||0}/${allLessonsN.length}\nKata: ${wordCount}/${allWords.length}\nUnit: ${user.current_unit||1}`,inline:true},
-      {name:'🎯 Sekarang',value:curLesson?`Unit ${curLesson.unit}: ${curLesson.nama}`:'-',inline:true},
-      {name:'🏅 Badge',value:`${badgeCount}/${allBadges.length}`,inline:true},
-      {name:'📈 Akurasi',value:(user.total_reviews||0)>0?`${Math.round((user.total_correct/user.total_reviews)*100)}%`:'-',inline:true},
-    ).setFooter({text:`Bergabung: ${(user.created_at||'').split('T')[0]||'-'}`})]});
+      {name:'🔥 Streak',value:(user.streak||0) + ' hari (Max: ' + (user.max_streak||0) + ')',inline:true},
+      {name:'📚 Progress',value:'Lesson: ' + (user.lessons_completed||0) + '/' + allLessonsN.length + '\nKata: ' + wordCount + '/' + allWords.length + '\nUnit: ' + (user.current_unit||1),inline:true},
+      {name:'🎯 Sekarang',value:curLesson ? ('Unit ' + curLesson.unit + ': ' + curLesson.nama) : '-',inline:true},
+      {name:'🏅 Badge',value:badgeCount + '/' + allBadges.length,inline:true},
+      {name:'📈 Akurasi',value:(user.total_reviews||0)>0 ? (Math.round((user.total_correct/user.total_reviews)*100) + '%') : '-',inline:true},
+      {name:'🔄 Review Queue',value:dueNow > 0 ? (dueNow + ' kata siap direview') : 'Kosong',inline:true},
+    )
+    .setFooter({text:'Bergabung: ' + (((user.created_at||'').split('T')[0])||'-')});
+
+  if (weakFocus.length > 0) {
+    embed.addFields({
+      name:'🧠 Kata Lemah',
+      value:weakFocus.map(w => w.hanzi + ' (' + w.pinyin + ') — ' + w.arti).join('\n'),
+      inline:false
+    });
+  }
+
+  await interaction.reply({ embeds:[embed] });
 }
+
+
 
 async function handleStatistik(interaction) {
   const userId=interaction.user.id;
   const user=ensureUser(userId,interaction.user.username);
+
   const wrongWords=db.prepare('SELECT uw.*,w.hanzi,w.pinyin FROM user_words uw JOIN words w ON uw.word_id=w.id WHERE uw.user_id=? AND uw.times_wrong>0 ORDER BY uw.times_wrong DESC LIMIT 5').all(userId);
   const catStats=db.prepare('SELECT w.kategori,COUNT(*) as total,SUM(CASE WHEN uw.times_correct>=3 THEN 1 ELSE 0 END) as mastered FROM user_words uw JOIN words w ON uw.word_id=w.id WHERE uw.user_id=? GROUP BY w.kategori').all(userId);
   const unitProgress=db.prepare('SELECT w.unit,COUNT(DISTINCT w.id) as total,COUNT(DISTINCT CASE WHEN uw.times_correct>=3 THEN uw.word_id END) as mastered FROM words w LEFT JOIN user_words uw ON w.id=uw.word_id AND uw.user_id=? GROUP BY w.unit ORDER BY w.unit').all(userId);
-  await interaction.reply({embeds:[new EmbedBuilder().setColor(0xe74c3c).setTitle(`📊 Statistik ${interaction.user.username}`)
+  const weakRecs = getWeakWords(db, userId, 5);
+
+  const embed = new EmbedBuilder()
+    .setColor(0xe74c3c)
+    .setTitle('📊 Statistik ' + interaction.user.username)
     .addFields(
-      {name:'📈 Overview',value:`Review: ${user.total_reviews||0} | Benar: ${user.total_correct||0} | Akurasi: ${(user.total_reviews||0)>0?Math.round((user.total_correct/user.total_reviews)*100):0}%`},
-      {name:'❌ Sering Salah',value:wrongWords.length?wrongWords.map((w,i)=>`${i+1}. ${w.hanzi} ❌${w.times_wrong} ✅${w.times_correct}`).join('\n'):'Belum ada'},
-      {name:'📂 Per Kategori',value:catStats.length?catStats.map(c=>`${c.kategori}: ${c.mastered}/${c.total}`).join('\n'):'Belum ada'},
-      {name:'📊 Per Unit',value:unitProgress.length?unitProgress.map(u=>{const p=u.total>0?Math.round((u.mastered/u.total)*100):0;return `U${u.unit}: ${'█'.repeat(Math.round(p/10))}${'░'.repeat(10-Math.round(p/10))} ${p}%`;}).join('\n'):'Belum ada'},
-    )]});
+      {name:'📈 Overview',value:'Review: ' + (user.total_reviews||0) + ' | Benar: ' + (user.total_correct||0) + ' | Akurasi: ' + ((user.total_reviews||0)>0 ? Math.round((user.total_correct/user.total_reviews)*100) : 0) + '%'},
+      {name:'❌ Sering Salah',value:wrongWords.length ? wrongWords.map((w,i)=> (i+1) + '. ' + w.hanzi + ' ❌' + w.times_wrong + ' ✅' + w.times_correct).join('\n') : 'Belum ada'},
+      {name:'📂 Per Kategori',value:catStats.length ? catStats.map(c=>c.kategori + ': ' + c.mastered + '/' + c.total).join('\n') : 'Belum ada'},
+      {name:'📊 Per Unit',value:unitProgress.length ? unitProgress.map(u=>{const p=u.total>0?Math.round((u.mastered/u.total)*100):0;return 'U' + u.unit + ': ' + '█'.repeat(Math.round(p/10)) + '░'.repeat(10-Math.round(p/10)) + ' ' + p + '%';}).join('\n') : 'Belum ada'}
+    );
+
+  if (weakRecs.length > 0) {
+    embed.addFields({
+      name:'🎯 Rekomendasi Review',
+      value:weakRecs.map(w => {
+        const acc = w.accuracy !== undefined ? Math.round(w.accuracy * 100) : 0;
+        return w.hanzi + ' (' + w.pinyin + ') — ' + w.arti + ' • ' + acc + '%';
+      }).join('\n'),
+      inline:false
+    });
+  }
+
+  await interaction.reply({ embeds:[embed] });
 }
+
 
 async function handleStreak(interaction) {
   const user=ensureUser(interaction.user.id,interaction.user.username);
