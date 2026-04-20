@@ -58,6 +58,21 @@ const commands = [
   new SlashCommandBuilder().setName('adminuser')
     .setDescription('🔍 Detail user tertentu (admin only)')
     .addUserOption(opt => opt.setName('user').setDescription('Target user').setRequired(true)),
+
+  // === SHOP & WEEKLY ===
+  new SlashCommandBuilder().setName('shop').setDescription('🏪 Belanja item pakai XP'),
+  new SlashCommandBuilder().setName('buy')
+    .setDescription('💰 Beli item dari shop')
+    .addStringOption(opt =>
+      opt.setName('item').setDescription('Pilih item')
+        .addChoices(
+          { name: '❄️ Streak Freeze (500 XP)', value: 'streak_freeze' },
+          { name: '❤️ Heart Refill (200 XP)', value: 'heart_refill' },
+          { name: '⚡ Double XP 1jam (800 XP)', value: 'double_xp' },
+          { name: '⏩ Skip Lesson (1000 XP)', value: 'skip_lesson' },
+        )
+        .setRequired(true)),
+  new SlashCommandBuilder().setName('weekly').setDescription('📊 Rangkuman belajar minggu ini'),
 ].map(cmd => cmd.toJSON());
 
 const rest = new REST({ version: '10' }).setToken(process.env.BOT_TOKEN);

@@ -48,6 +48,7 @@ const allChallengesN = allChallenges.map(normalizeChallenge);
 const allTonesN     = allTones.map(normalizeTone);
 
 const { shuffle, getLevel, xpBar, heartsDisplay, similarity, todayStr, generateWordSearchGrid, renderGrid, getWeakWords, getReviewWords, nextReviewDate, getDailyReward } = require('./utils/helpers');
+const { SHOP_ITEMS } = require('./config/shop');
 const { ensureRoles, syncRole, syncAllRoles } = require('./utils/roleSync');
 
 const db = new Database(path.join(__dirname, 'database', 'duochinese.db'));
@@ -59,6 +60,16 @@ const sessions = new Map();
 const battleSessions = new Map();
 const wordsearchSessions = new Map();
 const speedSessions = new Map();
+
+
+function getWeekString(d = new Date()) {
+  const year = d.getFullYear();
+  const start = new Date(year, 0, 1);
+  const diff = d - start;
+  const oneWeek = 604800000;
+  const weekNum = Math.ceil(((diff / oneWeek) + start.getDay() + 1) / 1);
+  return year + '-W' + String(weekNum).padStart(2, '0');
+}
 
 function ensureUser(userId, username) {
   if (!db.prepare('SELECT user_id FROM users WHERE user_id=?').get(userId)) {
@@ -80,6 +91,13 @@ function updateStreak(userId) {
 
 function addXp(userId, amount, guildId=null) {
   if (!amount||amount<=0) return;
+
+  // Check double XP
+  const userDoubleXp = db.prepare('SELECT double_xp_until FROM users WHERE user_id=?').get(userId);
+  if (userDoubleXp && userDoubleXp.double_xp_until && new Date(userDoubleXp.double_xp_until) > new Date()) {
+    amount = amount * 2;
+  }
+
   db.prepare('UPDATE users SET xp=xp+? WHERE user_id=?').run(amount, userId);
   if (guildId) {
     if (db.prepare('SELECT 1 FROM server_xp WHERE user_id=? AND guild_id=?').get(userId, guildId))
@@ -90,10 +108,20 @@ function addXp(userId, amount, guildId=null) {
   const {xp} = db.prepare('SELECT xp FROM users WHERE user_id=?').get(userId);
   const newLevel = getLevel(xp).level;
   db.prepare('UPDATE users SET level=? WHERE user_id=?').run(newLevel, userId);
-  // Sync Discord role if in a guild
+
+  // Auto role sync
   if (guildId) {
     const guild = client.guilds.cache.get(guildId);
     if (guild) syncRole(guild, userId, newLevel).catch(() => {});
+  }
+
+  // Track weekly stats
+  const weekStr = getWeekString();
+  const existing = db.prepare('SELECT * FROM weekly_stats WHERE user_id=? AND week=?').get(userId, weekStr);
+  if (existing) {
+    db.prepare('UPDATE weekly_stats SET xp_earned=xp_earned+? WHERE user_id=? AND week=?').run(amount, userId, weekStr);
+  } else {
+    db.prepare('INSERT INTO weekly_stats (user_id,week,xp_earned) VALUES (?,?,?)').run(userId, weekStr, amount);
   }
 }
 
@@ -645,6 +673,158 @@ async function handleSyncRoles(interaction) {
 }
 
 
+
+async function handleShop(interaction) {
+  const userId = interaction.user.id;
+  const user = ensureUser(userId, interaction.user.username);
+
+  const itemList = SHOP_ITEMS.map(item => {
+    const canAfford = (user.xp || 0) >= item.cost;
+    return (canAfford ? '🟢' : '🔴') + ' **' + item.name + '** — ' + item.cost + ' XP\n' + item.desc;
+  }).join('\n\n');
+
+  const embed = new EmbedBuilder()
+    .setColor(0xf39c12)
+    .setTitle('🏪 XP Shop')
+    .setDescription('Belanja item pakai XP kamu!\n\n' + itemList)
+    .addFields(
+      { name: '💰 XP Kamu', value: String(user.xp || 0), inline: true },
+      { name: '💡 Cara beli', value: '/buy item:(pilih item)', inline: true },
+    )
+    .setFooter({ text: 'XP yang dipakai akan berkurang dari total XP kamu' });
+
+  await interaction.reply({ embeds: [embed] });
+}
+
+async function handleBuy(interaction) {
+  const userId = interaction.user.id;
+  const user = ensureUser(userId, interaction.user.username);
+  const itemId = interaction.options.getString('item');
+  const item = SHOP_ITEMS.find(i => i.id === itemId);
+
+  if (!item) return interaction.reply({ content: '❌ Item tidak ditemukan.', ephemeral: true });
+  if ((user.xp || 0) < item.cost) {
+    return interaction.reply({
+      content: '❌ XP tidak cukup! Kamu punya **' + (user.xp || 0) + ' XP**, butuh **' + item.cost + ' XP**.\nTerus belajar untuk dapat lebih banyak XP! 📚',
+      ephemeral: true
+    });
+  }
+
+  // Deduct XP
+  db.prepare('UPDATE users SET xp = xp - ?, total_xp_spent = COALESCE(total_xp_spent, 0) + ? WHERE user_id = ?')
+    .run(item.cost, item.cost, userId);
+
+  // Record purchase
+  db.prepare('INSERT INTO purchases (user_id, item, cost) VALUES (?, ?, ?)')
+    .run(userId, item.id, item.cost);
+
+  // Apply item effect
+  let effectMsg = '';
+
+  switch (item.id) {
+    case 'streak_freeze': {
+      const today = todayStr();
+      db.prepare('UPDATE users SET streak_freeze_count = COALESCE(streak_freeze_count, 0) + 1, streak_freeze_active = ? WHERE user_id = ?')
+        .run(today, userId);
+      effectMsg = '❄️ Streak Freeze aktif! Streak kamu dilindungi hari ini.';
+      break;
+    }
+    case 'heart_refill': {
+      db.prepare('UPDATE users SET hearts = 5, hearts_refreshed_at = ? WHERE user_id = ?')
+        .run(new Date().toISOString(), userId);
+      effectMsg = '❤️ Nyawa terisi penuh! 5/5';
+      break;
+    }
+    case 'double_xp': {
+      const until = new Date(Date.now() + 3600000).toISOString();
+      db.prepare('UPDATE users SET double_xp_until = ? WHERE user_id = ?')
+        .run(until, userId);
+      effectMsg = '⚡ Double XP aktif selama 1 jam! Semua XP x2!';
+      break;
+    }
+    case 'skip_lesson': {
+      const curLesson = user.current_lesson || 1;
+      const nextLesson = allLessonsN.find(l => l.id === curLesson + 1);
+      if (nextLesson) {
+        db.prepare('INSERT OR REPLACE INTO user_lessons (user_id, lesson_id, completed, best_score) VALUES (?, ?, 1, 0)')
+          .run(userId, curLesson);
+        db.prepare('UPDATE users SET current_lesson = ?, current_unit = ?, lessons_completed = lessons_completed + 1 WHERE user_id = ?')
+          .run(nextLesson.id, nextLesson.unit, userId);
+        effectMsg = '⏩ Lesson ' + curLesson + ' di-skip! Sekarang di Lesson ' + nextLesson.id + '.';
+      } else {
+        effectMsg = '⏩ Kamu sudah di lesson terakhir!';
+        // Refund
+        db.prepare('UPDATE users SET xp = xp + ? WHERE user_id = ?').run(item.cost, userId);
+      }
+      break;
+    }
+  }
+
+  const newXp = db.prepare('SELECT xp FROM users WHERE user_id = ?').get(userId).xp;
+
+  await interaction.reply({
+    embeds: [new EmbedBuilder()
+      .setColor(0x2ecc71)
+      .setTitle('🛒 Pembelian Berhasil!')
+      .setDescription(item.emoji + ' **' + item.name + '** telah dibeli!')
+      .addFields(
+        { name: '💰 XP Dipakai', value: String(item.cost), inline: true },
+        { name: '💰 Sisa XP', value: String(newXp), inline: true },
+        { name: '✨ Efek', value: effectMsg, inline: false },
+      )]
+  });
+}
+
+async function handleWeekly(interaction) {
+  const userId = interaction.user.id;
+  const user = ensureUser(userId, interaction.user.username);
+  const weekStr = getWeekString();
+
+  const stats = db.prepare('SELECT * FROM weekly_stats WHERE user_id = ? AND week = ?').get(userId, weekStr);
+
+  const xpThisWeek = stats?.xp_earned || 0;
+  const reviewsThisWeek = stats?.reviews_done || 0;
+  const correctThisWeek = stats?.correct_answers || 0;
+  const wordsThisWeek = stats?.words_learned || 0;
+  const accThisWeek = reviewsThisWeek > 0 ? Math.round((correctThisWeek / reviewsThisWeek) * 100) : 0;
+
+  // Server ranking this week
+  let rankText = '-';
+  if (interaction.guildId) {
+    const serverWeekly = db.prepare('SELECT ws.user_id, ws.xp_earned, u.username FROM weekly_stats ws JOIN users u ON ws.user_id = u.user_id WHERE ws.week = ? ORDER BY ws.xp_earned DESC LIMIT 10')
+      .all(weekStr);
+
+    if (serverWeekly.length > 0) {
+      const myRank = serverWeekly.findIndex(r => r.user_id === userId) + 1;
+      const medals = ['🥇', '🥈', '🥉'];
+      rankText = serverWeekly.slice(0, 5).map((r, i) =>
+        (i < 3 ? medals[i] : (i + 1) + '.') + ' ' + r.username + ' — ' + r.xp_earned + ' XP'
+      ).join('\n');
+      if (myRank > 0) rankText += '\n\nKamu: #' + myRank;
+    }
+  }
+
+  // Streak info
+  const streakEmoji = (user.streak || 0) >= 7 ? '🔥' : (user.streak || 0) >= 3 ? '🔥' : '❄️';
+
+  await interaction.reply({
+    embeds: [new EmbedBuilder()
+      .setColor(0x3498db)
+      .setTitle('📊 Rangkuman Minggu Ini — ' + weekStr)
+      .setThumbnail(interaction.user.displayAvatarURL())
+      .addFields(
+        { name: '💰 XP Minggu Ini', value: String(xpThisWeek), inline: true },
+        { name: '📚 Kata Baru', value: String(wordsThisWeek), inline: true },
+        { name: '🔄 Reviews', value: String(reviewsThisWeek), inline: true },
+        { name: '📈 Akurasi', value: accThisWeek + '%', inline: true },
+        { name: streakEmoji + ' Streak', value: (user.streak || 0) + ' hari', inline: true },
+        { name: '❤️ Nyawa', value: heartsDisplay(checkHearts(userId)), inline: true },
+        { name: '🏆 Ranking Minggu Ini', value: rankText, inline: false },
+      )
+      .setFooter({ text: 'Terus belajar untuk naik ranking! 📚' })]
+  });
+}
+
 async function handleDbStats(interaction) {
   const isAdmin = interaction.memberPermissions?.has(0x8n) || interaction.user.id === interaction.guild?.ownerId;
   if (!isAdmin) return interaction.reply({ content: '❌ Admin only.', ephemeral: true });
@@ -963,7 +1143,7 @@ client.on('interactionCreate', async (interaction) => {
         skillmap:handleSkillmap, grammar:handleGrammar, challenge:handleChallenge,
         tonetrain:handleToneTrain, susun:handleSusun, battle:handleBattle,
         kamus:handleKamus, reminder:handleReminder, daily:handleDaily,
-        tebakemoji:handleTebakEmoji, wordsearch:handleWordSearch, speedround:handleSpeedRound, setuproles:handleSetupRoles, syncroles:handleSyncRoles, dbstats:handleDbStats, botinfo:handleBotInfo, adminuser:handleAdminUser,
+        tebakemoji:handleTebakEmoji, wordsearch:handleWordSearch, speedround:handleSpeedRound, setuproles:handleSetupRoles, syncroles:handleSyncRoles, shop:handleShop, buy:handleBuy, weekly:handleWeekly, dbstats:handleDbStats, botinfo:handleBotInfo, adminuser:handleAdminUser,
       };
       return handlers[interaction.commandName]?.(interaction);
     }
