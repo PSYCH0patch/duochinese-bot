@@ -644,6 +644,107 @@ async function handleSyncRoles(interaction) {
   return interaction.editReply(`✅ Sync selesai!\n• Synced: ${res.synced}\n• Skipped: ${res.skipped}\n• Total member: ${res.total}`);
 }
 
+
+async function handleDbStats(interaction) {
+  const isAdmin = interaction.memberPermissions?.has(0x8n) || interaction.user.id === interaction.guild?.ownerId;
+  if (!isAdmin) return interaction.reply({ content: '❌ Admin only.', ephemeral: true });
+
+  const totalUsers   = db.prepare('SELECT COUNT(*) as c FROM users').get().c;
+  const totalWords   = db.prepare('SELECT COUNT(*) as c FROM words').get().c;
+  const totalReviews = db.prepare('SELECT SUM(total_reviews) as c FROM users').get().c || 0;
+  const totalCorrect = db.prepare('SELECT SUM(total_correct) as c FROM users').get().c || 0;
+  const totalLessons = db.prepare('SELECT COUNT(*) as c FROM user_lessons WHERE completed=1').get().c;
+  const totalBadges  = db.prepare('SELECT COUNT(*) as c FROM user_badges').get().c;
+  const hsk1Count    = db.prepare('SELECT COUNT(*) as c FROM words WHERE hsk_level=1').get().c;
+  const hsk2Count    = db.prepare('SELECT COUNT(*) as c FROM words WHERE hsk_level=2').get().c;
+  const activeToday  = db.prepare('SELECT COUNT(*) as c FROM users WHERE last_active = ?').get(new Date().toISOString().split('T')[0]).c;
+  const topUsers     = db.prepare('SELECT username, xp, streak FROM users ORDER BY xp DESC LIMIT 5').all();
+  const globalAcc    = totalReviews > 0 ? Math.round((totalCorrect / totalReviews) * 100) + '%' : '-';
+
+  await interaction.reply({ ephemeral: true, embeds: [new EmbedBuilder()
+    .setColor(0x3498db).setTitle('📊 Database Stats')
+    .addFields(
+      { name: '👥 Users',           value: String(totalUsers),   inline: true },
+      { name: '🟢 Aktif Hari Ini',  value: String(activeToday),  inline: true },
+      { name: '📚 Words',           value: 'HSK1: ' + hsk1Count + ' | HSK2: ' + hsk2Count + ' | Total: ' + totalWords, inline: false },
+      { name: '🔄 Total Reviews',   value: String(totalReviews), inline: true },
+      { name: '✅ Total Correct',   value: String(totalCorrect), inline: true },
+      { name: '📈 Akurasi Global',  value: globalAcc,            inline: true },
+      { name: '🎓 Lessons Done',    value: String(totalLessons), inline: true },
+      { name: '🏅 Badges Earned',   value: String(totalBadges),  inline: true },
+      { name: '🏆 Top 5',           value: topUsers.length ? topUsers.map((u,i) => (i+1) + '. ' + u.username + ' — ' + u.xp + ' XP 🔥' + u.streak).join('\n') : '-', inline: false },
+    )
+    .setFooter({ text: 'DuoChinese Bot | ' + new Date().toLocaleString('id-ID') })] });
+}
+
+async function handleBotInfo(interaction) {
+  const sec  = Math.floor(process.uptime());
+  const h    = Math.floor(sec / 3600);
+  const m    = Math.floor((sec % 3600) / 60);
+  const s    = sec % 60;
+  const mem  = process.memoryUsage();
+  const rss  = Math.round(mem.rss / 1024 / 1024);
+  const heap = Math.round(mem.heapUsed / 1024 / 1024);
+
+  await interaction.reply({ ephemeral: true, embeds: [new EmbedBuilder()
+    .setColor(sessions.size > 20 ? 0xe74c3c : 0x2ecc71)
+    .setTitle('🤖 Bot Health Check')
+    .addFields(
+      { name: '⏱️ Uptime',      value: h + 'j ' + m + 'm ' + s + 'd',       inline: true },
+      { name: '💾 Memory RSS',  value: rss + ' MB',                           inline: true },
+      { name: '🧠 Heap Used',   value: heap + ' MB',                          inline: true },
+      { name: '📝 Sessions',    value: String(sessions.size),                 inline: true },
+      { name: '⚔️ Battles',     value: String(battleSessions.size),           inline: true },
+      { name: '🔍 Wordsearch',  value: String(wordsearchSessions.size),       inline: true },
+      { name: '⚡ Speed',       value: String(speedSessions.size),            inline: true },
+      { name: '📦 Node.js',     value: process.version,                       inline: true },
+      { name: '🌍 Servers',     value: String(client.guilds.cache.size),      inline: true },
+    )
+    .setFooter({ text: 'PID: ' + process.pid })] });
+}
+
+async function handleAdminUser(interaction) {
+  const isAdmin = interaction.memberPermissions?.has(0x8n) || interaction.user.id === interaction.guild?.ownerId;
+  if (!isAdmin) return interaction.reply({ content: '❌ Admin only.', ephemeral: true });
+
+  const target     = interaction.options.getUser('user');
+  const user       = db.prepare('SELECT * FROM users WHERE user_id = ?').get(target.id);
+  if (!user) return interaction.reply({ content: '❌ ' + target.username + ' belum ada di database.', ephemeral: true });
+
+  const lvl        = getLevel(user.xp || 0);
+  const wordCount  = db.prepare('SELECT COUNT(*) as c FROM user_words WHERE user_id = ? AND times_correct >= 3').get(target.id).c;
+  const badgeCount = db.prepare('SELECT COUNT(*) as c FROM user_badges WHERE user_id = ?').get(target.id).c;
+  const dueNow     = db.prepare('SELECT COUNT(*) as c FROM user_words WHERE user_id = ? AND next_review <= ?').get(target.id, new Date().toISOString()).c;
+  const weakWords  = getWeakWords(db, target.id, 5);
+  const wrongMost  = db.prepare('SELECT w.hanzi, w.pinyin, uw.times_wrong, uw.times_correct FROM user_words uw JOIN words w ON uw.word_id = w.id WHERE uw.user_id = ? ORDER BY uw.times_wrong DESC LIMIT 3').all(target.id);
+  const acc        = (user.total_reviews || 0) > 0 ? Math.round((user.total_correct / user.total_reviews) * 100) + '%' : '-';
+
+  const embed = new EmbedBuilder()
+    .setColor(0x9b59b6)
+    .setTitle('🔍 Admin: ' + target.username)
+    .setThumbnail(target.displayAvatarURL())
+    .addFields(
+      { name: '📊 Level',       value: lvl.nama + ' (' + (user.xp || 0) + ' XP)',           inline: true },
+      { name: '🔥 Streak',      value: (user.streak || 0) + ' hari',                         inline: true },
+      { name: '❤️ Hearts',      value: (user.hearts || 0) + '/5',                            inline: true },
+      { name: '📚 Kata',        value: wordCount + '/' + allWords.length,                    inline: true },
+      { name: '🏅 Badge',       value: badgeCount + '/' + allBadges.length,                 inline: true },
+      { name: '🔄 Due Review',  value: dueNow + ' kata',                                     inline: true },
+      { name: '📅 Last Active', value: user.last_active || '-',                              inline: true },
+      { name: '🎓 Lessons',     value: (user.lessons_completed || 0) + '/' + allLessonsN.length, inline: true },
+      { name: '📈 Akurasi',     value: acc,                                                  inline: true },
+    );
+
+  if (weakWords.length > 0) {
+    embed.addFields({ name: '🧠 Kata Lemah', value: weakWords.map(w => w.hanzi + ' (' + w.pinyin + ') — ' + w.arti).join('\n') });
+  }
+  if (wrongMost.length > 0) {
+    embed.addFields({ name: '❌ Sering Salah', value: wrongMost.map(w => w.hanzi + ' (' + w.pinyin + ') ❌' + w.times_wrong + ' ✅' + w.times_correct).join('\n') });
+  }
+
+  await interaction.reply({ embeds: [embed], ephemeral: true });
+}
+
 async function handleButton(interaction) {
   const userId=interaction.user.id; const cid=interaction.customId;
   if (cid==='susun_answer') {
@@ -862,7 +963,7 @@ client.on('interactionCreate', async (interaction) => {
         skillmap:handleSkillmap, grammar:handleGrammar, challenge:handleChallenge,
         tonetrain:handleToneTrain, susun:handleSusun, battle:handleBattle,
         kamus:handleKamus, reminder:handleReminder, daily:handleDaily,
-        tebakemoji:handleTebakEmoji, wordsearch:handleWordSearch, speedround:handleSpeedRound, setuproles:handleSetupRoles, syncroles:handleSyncRoles,
+        tebakemoji:handleTebakEmoji, wordsearch:handleWordSearch, speedround:handleSpeedRound, setuproles:handleSetupRoles, syncroles:handleSyncRoles, dbstats:handleDbStats, botinfo:handleBotInfo, adminuser:handleAdminUser,
       };
       return handlers[interaction.commandName]?.(interaction);
     }

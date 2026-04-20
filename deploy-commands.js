@@ -51,6 +51,13 @@ const commands = [
   new SlashCommandBuilder().setName('syncroles')
     .setDescription('🔄 Sinkron role level semua user')
     .addUserOption(opt => opt.setName('user').setDescription('Sinkron 1 user saja').setRequired(false)),
+
+  // === ADMIN DIAGNOSTICS ===
+  new SlashCommandBuilder().setName('dbstats').setDescription('📊 Statistik database bot (admin)'),
+  new SlashCommandBuilder().setName('botinfo').setDescription('🤖 Health check bot — uptime, memory, sessions'),
+  new SlashCommandBuilder().setName('adminuser')
+    .setDescription('🔍 Detail user tertentu (admin only)')
+    .addUserOption(opt => opt.setName('user').setDescription('Target user').setRequired(true)),
 ].map(cmd => cmd.toJSON());
 
 const rest = new REST({ version: '10' }).setToken(process.env.BOT_TOKEN);
