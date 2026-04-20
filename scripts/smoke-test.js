@@ -131,9 +131,15 @@ function loadData(relPath) {
     check('DB has >= 1 user', users >= 1, `got ${users}`);
 
     const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map(r => r.name);
-    const requiredTables = ['users', 'user_words', 'user_badges', 'user_lessons', 'user_challenges', 'battles', 'words', 'server_xp', 'daily_logins'];
+    const requiredTables = ['users', 'user_words', 'user_badges', 'user_lessons', 'user_challenges', 'battles', 'words', 'server_xp', 'daily_logins', 'purchases', 'weekly_stats'];
     for (const t of requiredTables) {
       check(`Table exists: ${t}`, tables.includes(t));
+    }
+
+    const userCols = db.prepare("PRAGMA table_info(users)").all().map(r => r.name);
+    const requiredUserCols = ['streak_freeze_count', 'streak_freeze_active', 'double_xp_until', 'total_xp_spent'];
+    for (const c of requiredUserCols) {
+      check(`User column exists: ${c}`, userCols.includes(c));
     }
 
     db.close();
