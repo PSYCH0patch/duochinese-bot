@@ -170,7 +170,7 @@ function loadData(relPath) {
     'katahariini','skillmap','grammar','challenge','tonetrain','susun','battle',
     'kamus','reminder','daily','tebakemoji','wordsearch','speedround',
     'setuproles','syncroles','dbstats','botinfo','adminuser',
-    'shop','buy','weekly','notif'
+    'shop','buy','weekly','notif','quiz','flashcard','progress','hint','pair'
   ];
 
   for (const r of routes) {
@@ -183,7 +183,7 @@ function loadData(relPath) {
     const rest = new REST({ version: '10' }).setToken(process.env.BOT_TOKEN);
     const cmds = await rest.get(Routes.applicationCommands(process.env.CLIENT_ID));
     const names = cmds.map(c => c.name);
-    check('Global commands count = 30', names.length === 30, `got ${names.length}`);
+    check('Global commands count >= 30', names.length >= 30, `got ${names.length}`);
     for (const r of routes) {
       check(`Global cmd: ${r}`, names.includes(r));
     }

@@ -48,6 +48,8 @@ const allChallengesN = allChallenges.map(normalizeChallenge);
 const allTonesN     = allTones.map(normalizeTone);
 
 const { shuffle, getLevel, xpBar, heartsDisplay, similarity, todayStr, generateWordSearchGrid, renderGrid, getWeakWords, getReviewWords, nextReviewDate, getDailyReward } = require('./utils/helpers');
+const { getTitle } = require('./config/titles');
+const { STREAK_REWARDS } = require('./config/streakRewards');
 const { runNotifications, sendNotif } = require('./utils/notifier');
 const { SHOP_ITEMS } = require('./config/shop');
 const { ensureRoles, syncRole, syncAllRoles } = require('./utils/roleSync');
@@ -1010,6 +1012,259 @@ async function handleNotif(interaction) {
   });
 }
 
+
+async function handleQuiz(interaction) {
+  const userId = interaction.user.id;
+  ensureUser(userId, interaction.user.username);
+  updateStreak(userId);
+
+  const mode = interaction.options.getString('mode');
+  const nilai = interaction.options.getInteger('nilai');
+  const hearts = checkHearts(userId);
+  if (hearts <= 0) return interaction.reply({ content: '💔 Nyawa habis!', flags: MessageFlags.Ephemeral });
+
+  let wordPool = [];
+  let label = '';
+
+  switch (mode) {
+    case 'unit': {
+      const unitNum = nilai || 1;
+      wordPool = allWords.filter(w => w.unit === unitNum);
+      label = 'Unit ' + unitNum;
+      break;
+    }
+    case 'kategori': {
+      const cats = [...new Set(allWords.map(w => w.kategori))];
+      const randomCat = cats[Math.floor(Math.random() * cats.length)];
+      wordPool = allWords.filter(w => w.kategori === randomCat);
+      label = randomCat;
+      break;
+    }
+    case 'hsk': {
+      const hskLevel = nilai || 1;
+      wordPool = allWords.filter(w => hskLevel === 1 ? w.id <= 150 : w.id > 150);
+      label = 'HSK ' + hskLevel;
+      break;
+    }
+    case 'lemah': {
+      const weak = getWeakWords(db, userId, 10);
+      wordPool = weak.map(w => allWords.find(aw => aw.id === w.word_id)).filter(Boolean);
+      label = 'Kata Lemah';
+      break;
+    }
+    case 'random':
+    default: {
+      wordPool = shuffle(allWords);
+      label = 'Random';
+      break;
+    }
+  }
+
+  if (wordPool.length < 4) return interaction.reply({ content: '❌ Tidak cukup kata untuk mode ini.', flags: MessageFlags.Ephemeral });
+
+  const selected = shuffle(wordPool).slice(0, 7);
+  const qs = selected.map(w => generateQuestion(w, allWords));
+
+  const _prevLevelUser = db.prepare('SELECT level FROM users WHERE user_id=?').get(userId);
+  sessions.set(userId, { lessonId: 'quiz_custom', questions: qs, current: 0, score: 0, startTime: Date.now(), guildId: interaction.guildId, ownerId: userId, _prevLevel: _prevLevelUser?.level || 0 });
+
+  const { embed, row } = buildUI(qs[0], 1, qs.length, hearts, '🎯 Quiz: ' + label, userId);
+  await interaction.reply({ embeds: [embed], components: [row] });
+}
+
+async function handleFlashcard(interaction) {
+  const userId = interaction.user.id;
+  ensureUser(userId, interaction.user.username);
+  updateStreak(userId);
+
+  const mode = interaction.options?.getString('mode') || 'random';
+  const unitNum = interaction.options?.getInteger('unit');
+
+  let wordPool = [];
+  if (mode === 'lemah') {
+    const weak = getWeakWords(db, userId, 8);
+    wordPool = weak.map(w => allWords.find(aw => aw.id === w.word_id)).filter(Boolean);
+  } else if (mode === 'unit' && unitNum) {
+    wordPool = allWords.filter(w => w.unit === unitNum);
+  } else {
+    wordPool = shuffle(allWords);
+  }
+
+  if (wordPool.length < 3) return interaction.reply({ content: '❌ Tidak cukup kata.', flags: MessageFlags.Ephemeral });
+
+  const selected = shuffle(wordPool).slice(0, 5);
+  const wordIds = selected.map(w => w.id);
+  const word = selected[0];
+
+  db.prepare('INSERT OR REPLACE INTO flashcard_sessions (user_id, word_ids, current, correct, started_at) VALUES (?, ?, 0, 0, ?)').run(userId, JSON.stringify(wordIds), new Date().toISOString());
+
+  const embed = new EmbedBuilder()
+    .setColor(0x9b59b6)
+    .setTitle('🃏 Flashcard 1/5')
+    .setDescription('Apa **arti** dari karakter ini?\n\n# ' + word.hanzi)
+    .setFooter({ text: 'Ketik jawabanmu di popup!' });
+
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId('fc_answer_uid_' + userId).setLabel('✍️ Jawab').setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId('fc_skip_uid_' + userId).setLabel('⏭️ Skip').setStyle(ButtonStyle.Secondary)
+  );
+
+  await interaction.reply({ embeds: [embed], components: [row] });
+}
+
+async function handleProgress(interaction) {
+  const userId = interaction.user.id;
+  const user = ensureUser(userId, interaction.user.username);
+  const lvl = getLevel(user.xp || 0);
+  const title = getTitle(user.xp || 0);
+  const wordCount = db.prepare('SELECT COUNT(*) as c FROM user_words WHERE user_id=? AND times_correct>=3').get(userId).c;
+  const totalWords = allWords.length;
+  const badgeCount = db.prepare('SELECT COUNT(*) as c FROM user_badges WHERE user_id=?').get(userId).c;
+  const dueNow = db.prepare('SELECT COUNT(*) as c FROM user_words WHERE user_id=? AND next_review<=?').get(userId, new Date().toISOString()).c;
+  const lessonsN = allLessonsN.length;
+
+  // Per-unit progress bars
+  const maxUnit = Math.max(...allLessonsN.map(l => l.unit));
+  let unitBars = '';
+  for (let u = 1; u <= maxUnit; u++) {
+    const unitWords = allWords.filter(w => w.unit === u);
+    const mastered = db.prepare('SELECT COUNT(*) as c FROM user_words WHERE user_id=? AND times_correct>=3 AND word_id IN (' + unitWords.map(w => w.id).join(',') + ')').get(userId).c;
+    const pct = unitWords.length > 0 ? Math.round((mastered / unitWords.length) * 100) : 0;
+    const bar = '█'.repeat(Math.round(pct / 10)) + '░'.repeat(10 - Math.round(pct / 10));
+    const hsk = u <= 8 ? '①' : '②';
+    unitBars += hsk + ' U' + u + ': ' + bar + ' ' + pct + '%\n';
+  }
+
+  // Accuracy history
+  const acc = (user.total_reviews || 0) > 0 ? Math.round(((user.total_correct || 0) / user.total_reviews) * 100) : 0;
+
+  const embed = new EmbedBuilder()
+    .setColor(0x2ecc71)
+    .setTitle('📊 Progress Card — ' + interaction.user.username)
+    .setThumbnail(interaction.user.displayAvatarURL())
+    .setDescription(title.emoji + ' **' + title.title + '** (' + title.titleEn + ')')
+    .addFields(
+      { name: '📊 Level', value: lvl.nama + '\nXP: ' + (user.xp || 0) + (lvl.next ? '/' + lvl.next : ' MAX') + '\n' + xpBar(user.xp || 0, lvl.next), inline: false },
+      { name: '🔥 Streak', value: (user.streak || 0) + ' hari (Max: ' + (user.max_streak || 0) + ')', inline: true },
+      { name: '📈 Akurasi', value: acc + '%', inline: true },
+      { name: '🔄 Due Review', value: dueNow + ' kata', inline: true },
+      { name: '📚 Kata Dikuasai', value: wordCount + '/' + totalWords + ' (' + Math.round((wordCount / totalWords) * 100) + '%)', inline: true },
+      { name: '🎓 Lessons', value: (user.lessons_completed || 0) + '/' + lessonsN, inline: true },
+      { name: '🏅 Badge', value: badgeCount + '/' + allBadges.length, inline: true },
+      { name: '📊 Progress Per Unit', value: unitBars, inline: false },
+    )
+    .setFooter({ text: 'DuoChinese Bot • /progress' });
+
+  await interaction.reply({ embeds: [embed] });
+}
+
+async function handleHint(interaction) {
+  const userId = interaction.user.id;
+  const session = sessions.get(userId);
+
+  if (!session || session.type === 'susun') {
+    return interaction.reply({ content: '❌ Kamu tidak sedang dalam sesi quiz. Mulai dengan /mulai atau /quiz', flags: MessageFlags.Ephemeral });
+  }
+
+  const currentQ = session.questions[session.current];
+  if (!currentQ || !currentQ.word) {
+    return interaction.reply({ content: '❌ Tidak ada soal aktif.', flags: MessageFlags.Ephemeral });
+  }
+
+  const user = db.prepare('SELECT xp FROM users WHERE user_id=?').get(userId);
+  if ((user?.xp || 0) < 5) {
+    return interaction.reply({ content: '❌ XP tidak cukup! Hint memerlukan 5 XP.', flags: MessageFlags.Ephemeral });
+  }
+
+  db.prepare('UPDATE users SET xp = xp - 5 WHERE user_id = ?').run(userId);
+
+  const word = currentQ.word;
+  let hintText = '';
+
+  if (currentQ.type === 'arti') {
+    hintText = '💡 Pinyin: **' + word.pinyin + '**';
+  } else if (currentQ.type === 'hanzi') {
+    hintText = '💡 Pinyin: **' + word.pinyin + '**';
+  } else if (currentQ.type === 'pinyin') {
+    hintText = '💡 Arti: **' + word.arti + '**';
+  } else if (currentQ.type === 'fill') {
+    hintText = '💡 Kata yang dicari: **' + word.pinyin + '** (' + word.arti + ')';
+  }
+
+  await interaction.reply({ content: hintText + '\n-5 XP dipakai untuk hint.', flags: MessageFlags.Ephemeral });
+}
+
+async function handlePair(interaction) {
+  const userId = interaction.user.id;
+  const partner = interaction.options.getUser('teman');
+
+  if (partner.id === userId) return interaction.reply({ content: '❌ Tidak bisa pair dengan diri sendiri!', flags: MessageFlags.Ephemeral });
+  if (partner.bot) return interaction.reply({ content: '❌ Tidak bisa pair dengan bot!', flags: MessageFlags.Ephemeral });
+
+  ensureUser(userId, interaction.user.username);
+  ensureUser(partner.id, partner.username);
+
+  const qs = shuffle(allWords).slice(0, 5).map(w => generateQuestion(w, allWords));
+  db.prepare("INSERT INTO pair_sessions (user1_id, user2_id, questions, status) VALUES (?, ?, ?, 'pending')").run(userId, partner.id, JSON.stringify(qs));
+
+  const embed = new EmbedBuilder()
+    .setColor(0x3498db)
+    .setTitle('👫 Belajar Bersama!')
+    .setDescription('**' + interaction.user.username + '** mengajak **' + partner.username + '** belajar bersama!\n\n5 soal yang sama. Jawab masing-masing. Kalau dua-duanya benar, dapat bonus XP!');
+
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId('pair_accept_' + userId + '_uid_' + partner.id).setLabel('✅ Ikut Belajar!').setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId('pair_decline_' + userId + '_uid_' + partner.id).setLabel('❌ Nanti').setStyle(ButtonStyle.Danger)
+  );
+
+  await interaction.reply({ embeds: [embed], components: [row] });
+}
+
+async function handleLeaderboardEnhanced(interaction) {
+  const tipe = interaction.options?.getString('tipe') || 'global';
+
+  if (tipe === 'alltime') {
+    const rows = db.prepare('SELECT username, xp, streak FROM users ORDER BY xp DESC LIMIT 15').all();
+    if (!rows.length) return interaction.reply({ content: 'Belum ada data!', flags: MessageFlags.Ephemeral });
+    const medals = ['🥇','🥈','🥉'];
+    const list = rows.map((r,i) => {
+      const m = i < 3 ? medals[i] : (i+1) + '.';
+      const t = getTitle(r.xp || 0);
+      return m + ' **' + r.username + '** — ' + (r.xp||0) + ' XP ' + t.emoji + ' 🔥' + (r.streak||0);
+    }).join('\n');
+    return interaction.reply({ embeds: [new EmbedBuilder().setColor(0xf1c40f).setTitle('📜 Leaderboard All-Time').setDescription(list)] });
+  }
+
+  if (tipe === 'server' && interaction.guildId) {
+    const rows = db.prepare('SELECT u.username, sx.xp, u.streak FROM server_xp sx JOIN users u ON sx.user_id=u.user_id WHERE sx.guild_id=? ORDER BY sx.xp DESC LIMIT 15').all(interaction.guildId);
+    if (!rows.length) return interaction.reply({ content: 'Belum ada data di server ini!', flags: MessageFlags.Ephemeral });
+    const medals = ['🥇','🥈','🥉'];
+    const list = rows.map((r,i) => {
+      const m = i < 3 ? medals[i] : (i+1) + '.';
+      const t = getTitle(r.xp || 0);
+      return m + ' **' + r.username + '** — ' + (r.xp||0) + ' XP ' + t.emoji + ' 🔥' + (r.streak||0);
+    }).join('\n');
+    return interaction.reply({ embeds: [new EmbedBuilder().setColor(0x3498db).setTitle('🏠 Leaderboard Server — Minggu Ini').setDescription(list).setFooter({ text: 'Reset setiap Senin' })] });
+  }
+
+  // Global (seasonal - 3 months)
+  const rows = db.prepare('SELECT username, xp, streak FROM users ORDER BY xp DESC LIMIT 15').all();
+  if (!rows.length) return interaction.reply({ content: 'Belum ada data!', flags: MessageFlags.Ephemeral });
+  const medals = ['🥇','🥈','🥉'];
+  const list = rows.map((r,i) => {
+    const m = i < 3 ? medals[i] : (i+1) + '.';
+    const t = getTitle(r.xp || 0);
+    return m + ' **' + r.username + '** — ' + (r.xp||0) + ' XP ' + t.emoji + ' 🔥' + (r.streak||0);
+  }).join('\n');
+
+  const now = new Date();
+  const seasonEnd = new Date(now.getFullYear(), Math.ceil((now.getMonth() + 1) / 3) * 3, 0);
+  const daysLeft = Math.ceil((seasonEnd - now) / 86400000);
+
+  return interaction.reply({ embeds: [new EmbedBuilder().setColor(0xf1c40f).setTitle('🌍 Leaderboard Global — Season').setDescription(list).setFooter({ text: 'Reset dalam ' + daysLeft + ' hari | Season berakhir ' + seasonEnd.toISOString().split('T')[0] })] });
+}
+
+
 async function handleButton(interaction) {
   const userId=interaction.user.id;
   let cid=interaction.customId;
@@ -1061,6 +1316,45 @@ async function handleButton(interaction) {
     wordsearchSessions.delete(userId);
     return interaction.update({embeds:[new EmbedBuilder().setColor(0xe74c3c).setTitle('🏳️ Menyerah').setDescription(`Jawabannya: **${s.placed.map(p=>p.word).join(', ')}**\nDitemukan: ${s.found.length}/${s.placed.length}`)],components:[]});
   }
+  // Flashcard buttons
+  if (cid.startsWith('fc_answer')) {
+    const fcSession = db.prepare('SELECT * FROM flashcard_sessions WHERE user_id=?').get(userId);
+    if (!fcSession) return interaction.reply({ content: '❌ Sesi flashcard tidak ditemukan.', flags: MessageFlags.Ephemeral });
+
+    const modal = new ModalBuilder().setCustomId('fc_modal').setTitle('Flashcard — Jawab');
+    modal.addComponents(new ActionRowBuilder().addComponents(
+      new TextInputBuilder().setCustomId('fc_input').setLabel('Ketik arti dari karakter ini').setStyle(TextInputStyle.Short).setRequired(true)
+    ));
+    return interaction.showModal(modal);
+  }
+
+  if (cid.startsWith('fc_skip')) {
+    const fcSession = db.prepare('SELECT * FROM flashcard_sessions WHERE user_id=?').get(userId);
+    if (!fcSession) return interaction.reply({ content: '❌ Sesi flashcard tidak ditemukan.', flags: MessageFlags.Ephemeral });
+
+    const wordIds = JSON.parse(fcSession.word_ids);
+    const nextIdx = fcSession.current + 1;
+
+    if (nextIdx >= wordIds.length) {
+      db.prepare('DELETE FROM flashcard_sessions WHERE user_id=?').run(userId);
+      return interaction.update({ embeds: [new EmbedBuilder().setColor(0x2ecc71).setTitle('🃏 Flashcard Selesai!').setDescription('Skor: ' + fcSession.correct + '/' + wordIds.length)], components: [] });
+    }
+
+    db.prepare('UPDATE flashcard_sessions SET current=? WHERE user_id=?').run(nextIdx, userId);
+    const nextWord = allWords.find(w => w.id === wordIds[nextIdx]);
+    if (!nextWord) return interaction.update({ embeds: [new EmbedBuilder().setTitle('❌ Error').setDescription('Kata tidak ditemukan')], components: [] });
+
+    return interaction.update({
+      embeds: [new EmbedBuilder().setColor(0x9b59b6).setTitle('🃏 Flashcard ' + (nextIdx + 1) + '/' + wordIds.length)
+        .setDescription('Apa **arti** dari karakter ini?\n\n# ' + nextWord.hanzi)
+        .setFooter({ text: 'Skor: ' + fcSession.correct + '/' + nextIdx })],
+      components: [new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId('fc_answer_uid_' + userId).setLabel('✍️ Jawab').setStyle(ButtonStyle.Primary),
+        new ButtonBuilder().setCustomId('fc_skip_uid_' + userId).setLabel('⏭️ Skip').setStyle(ButtonStyle.Secondary)
+      )]
+    });
+  }
+
   if (cid.startsWith('battle_accept_')) {
     const battleId=parseInt(cid.replace('battle_accept_','')); const b=battleSessions.get(battleId);
     if (!b) return interaction.reply({content:'❌ Battle tidak ditemukan.',flags:MessageFlags.Ephemeral});
@@ -1159,6 +1453,62 @@ async function handleModal(interaction) {
     addXp(userId,xp,s.guildId); sessions.delete(userId); checkAndAwardBadges(userId);
     return interaction.reply({embeds:[new EmbedBuilder().setColor(sim===100?0x2ecc71:sim>=50?0xf39c12:0xe74c3c).setTitle(`🧩 ${title}`).addFields({name:'Jawabanmu',value:answer||'(kosong)'},{name:'Jawaban benar',value:s.jawaban},{name:'Arti',value:s.arti},{name:'Kemiripan',value:`${sim}%`,inline:true},{name:'Waktu',value:`${elapsed}s`,inline:true},{name:'XP',value:`+${xp}`,inline:true})]});
   }
+  if (interaction.customId==='fc_modal') {
+    const fcSession = db.prepare('SELECT * FROM flashcard_sessions WHERE user_id=?').get(userId);
+    if (!fcSession) return interaction.reply({ content: '❌ Sesi tidak ditemukan.', flags: MessageFlags.Ephemeral });
+
+    const wordIds = JSON.parse(fcSession.word_ids);
+    const currentWord = allWords.find(w => w.id === wordIds[fcSession.current]);
+    if (!currentWord) return interaction.reply({ content: '❌ Kata tidak ditemukan.', flags: MessageFlags.Ephemeral });
+
+    const answer = interaction.fields.getTextInputValue('fc_input').trim().toLowerCase();
+    const correct = currentWord.arti.toLowerCase();
+    const sim = similarity(answer, correct);
+    const isCorrect = sim >= 70;
+
+    let newCorrect = fcSession.correct + (isCorrect ? 1 : 0);
+    const nextIdx = fcSession.current + 1;
+
+    if (isCorrect) {
+      addXp(userId, 5, interaction.guildId);
+    }
+
+    if (nextIdx >= wordIds.length) {
+      db.prepare('DELETE FROM flashcard_sessions WHERE user_id=?').run(userId);
+      const xpTotal = newCorrect * 5;
+      return interaction.reply({
+        embeds: [new EmbedBuilder().setColor(newCorrect >= 3 ? 0x2ecc71 : 0xe74c3c)
+          .setTitle('🃏 Flashcard Selesai!')
+          .addFields(
+            { name: '📊 Skor', value: newCorrect + '/' + wordIds.length, inline: true },
+            { name: '💰 XP', value: '+' + xpTotal, inline: true },
+          )
+          .setDescription((isCorrect ? '✅ ' : '❌ ') + currentWord.hanzi + ' (' + currentWord.pinyin + ') = ' + currentWord.arti)]
+      });
+    }
+
+    db.prepare('UPDATE flashcard_sessions SET current=?, correct=? WHERE user_id=?').run(nextIdx, newCorrect, userId);
+    const nextWord = allWords.find(w => w.id === wordIds[nextIdx]);
+
+    await interaction.reply({
+      content: (isCorrect ? '✅ Benar! ' : '❌ Salah! Jawaban: **' + correct + '** ') + '(' + sim + '% mirip)',
+      flags: MessageFlags.Ephemeral
+    });
+
+    try {
+      await interaction.message.edit({
+        embeds: [new EmbedBuilder().setColor(0x9b59b6).setTitle('🃏 Flashcard ' + (nextIdx + 1) + '/' + wordIds.length)
+          .setDescription('Apa **arti** dari karakter ini?\n\n# ' + (nextWord?.hanzi || '?'))
+          .setFooter({ text: 'Skor: ' + newCorrect + '/' + nextIdx })],
+        components: [new ActionRowBuilder().addComponents(
+          new ButtonBuilder().setCustomId('fc_answer_uid_' + userId).setLabel('✍️ Jawab').setStyle(ButtonStyle.Primary),
+          new ButtonBuilder().setCustomId('fc_skip_uid_' + userId).setLabel('⏭️ Skip').setStyle(ButtonStyle.Secondary)
+        )]
+      });
+    } catch(e) {}
+    return;
+  }
+
   if (interaction.customId==='ws_guess_modal') {
     const s=wordsearchSessions.get(userId);
     if (!s) return interaction.reply({content:'❌ Sesi tidak ditemukan.',flags:MessageFlags.Ephemeral});
@@ -1247,6 +1597,24 @@ client.once('clientReady', () => {
 
   setInterval(() => {
     runNotifications(client, db).catch(err => console.error('Notif error:', err));
+
+  // Daily word broadcast at 08:00
+  const nowHour = new Date().getHours();
+  const nowMin = new Date().getMinutes();
+  if (nowHour === 8 && nowMin < 5) {
+    const dayWord = allWords[Math.floor(Date.now() / 86400000) % allWords.length];
+    for (const guild of client.guilds.cache.values()) {
+      const channel = guild.channels.cache.find(c => c.name.includes('mandarin') || c.name.includes('chinese') || c.name.includes('belajar'));
+      if (channel) {
+        channel.send({ embeds: [new EmbedBuilder()
+          .setColor(0x9b59b6).setTitle('📅 Kata Hari Ini')
+          .setDescription('# ' + dayWord.hanzi + '\n\n**' + dayWord.pinyin + '** — ' + dayWord.arti)
+          .addFields({ name: '📝 Contoh', value: dayWord.contoh + '\n*' + dayWord.contoh_arti + '*' })
+          .setFooter({ text: 'Gunakan /daily untuk klaim XP harian!' })
+        ] }).catch(() => {});
+      }
+    }
+  }
   }, 5 * 60 * 1000);
 
   // Run once on startup too
@@ -1265,7 +1633,7 @@ client.on('interactionCreate', async (interaction) => {
         skillmap:handleSkillmap, grammar:handleGrammar, challenge:handleChallenge,
         tonetrain:handleToneTrain, susun:handleSusun, battle:handleBattle,
         kamus:handleKamus, reminder:handleReminder, daily:handleDaily,
-        tebakemoji:handleTebakEmoji, wordsearch:handleWordSearch, speedround:handleSpeedRound, setuproles:handleSetupRoles, syncroles:handleSyncRoles, shop:handleShop, buy:handleBuy, weekly:handleWeekly, notif:handleNotif, dbstats:handleDbStats, botinfo:handleBotInfo, adminuser:handleAdminUser,
+        tebakemoji:handleTebakEmoji, wordsearch:handleWordSearch, speedround:handleSpeedRound, setuproles:handleSetupRoles, syncroles:handleSyncRoles, shop:handleShop, buy:handleBuy, weekly:handleWeekly, notif:handleNotif, quiz:handleQuiz, flashcard:handleFlashcard, progress:handleProgress, hint:handleHint, pair:handlePair, dbstats:handleDbStats, botinfo:handleBotInfo, adminuser:handleAdminUser,
       };
       return handlers[interaction.commandName]?.(interaction);
     }
