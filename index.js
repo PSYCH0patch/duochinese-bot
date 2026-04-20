@@ -249,9 +249,36 @@ async function handleLanjut(interaction) {
   if (!lesson) return interaction.reply({content:'🎉 Semua lesson selesai!',ephemeral:true});
   const lessonWords=lesson.wordIds.map(id=>allWords.find(w=>w.id===id)).filter(Boolean);
   if (!lessonWords.length) return interaction.reply({content:'❌ Tidak ada kata.',ephemeral:true});
-  const qs=shuffle(lesson.isBoss?lessonWords:lessonWords.slice(0,5)).map(w=>generateQuestion(w,allWords));
+
+  let baseWords = shuffle(lesson.isBoss ? lessonWords : lessonWords.slice(0,5));
+
+  // === ADAPTIVE v3: selipkan kata lemah ===
+  let injectedWeak = 0;
+  if (!lesson.isBoss) {
+    const weak = getWeakWords(db, userId, 3);
+    const weakWordObjs = weak
+      .map(w => allWords.find(aw => aw.id === w.word_id))
+      .filter(Boolean)
+      .filter(w => !baseWords.find(bw => bw.id === w.id)); // jangan duplikat
+
+    const injectCount = Math.min(weakWordObjs.length, 2); // max 2 kata lemah
+    if (injectCount > 0) {
+      const injected = weakWordObjs.slice(0, injectCount);
+      // Selipkan di tengah, bukan di depan/belakang
+      const mid = Math.floor(baseWords.length / 2);
+      baseWords = [...baseWords.slice(0, mid), ...injected, ...baseWords.slice(mid)];
+      injectedWeak = injectCount;
+    }
+  }
+
+  const qs = baseWords.map(w => generateQuestion(w, allWords));
   sessions.set(userId,{lessonId:lesson.id,questions:qs,current:0,score:0,startTime:Date.now(),guildId:interaction.guildId});
-  const {embed,row}=buildUI(qs[0],1,qs.length,hearts,`Unit ${lesson.unit} • ${lesson.nama}`);
+
+  const label = injectedWeak > 0
+    ? `Unit ${lesson.unit} • ${lesson.nama} (+${injectedWeak} review)`
+    : `Unit ${lesson.unit} • ${lesson.nama}`;
+
+  const {embed,row}=buildUI(qs[0],1,qs.length,hearts,label);
   await interaction.reply({embeds:[embed],components:[row]});
 }
 
