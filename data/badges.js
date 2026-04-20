@@ -1,0 +1,23 @@
+const badges = [
+  { id: 'first_lesson',   emoji: '🐣', name: 'Langkah Pertama',  description: 'Selesaikan lesson pertama' },
+  { id: 'perfect_lesson', emoji: '💯', name: 'Perfect!',          description: 'Selesaikan lesson tanpa salah' },
+  { id: 'boss_slayer',    emoji: '⚔️', name: 'Boss Slayer',       description: 'Kalahkan boss quiz' },
+  { id: 'final_boss',     emoji: '🐉', name: 'Final Boss!',       description: 'Tamatkan semua unit' },
+  { id: 'survivor',       emoji: '❤️', name: 'Survivor',          description: 'Selesai dengan 1 nyawa tersisa' },
+  { id: 'speed_demon',    emoji: '⚡', name: 'Speed Demon',       description: 'Selesai lesson dalam 60 detik' },
+  { id: 'streak_3',       emoji: '🔥', name: '3 Hari Streak',     description: '3 hari berturut-turut' },
+  { id: 'streak_7',       emoji: '🔥', name: 'Seminggu!',         description: '7 hari berturut-turut' },
+  { id: 'streak_30',      emoji: '⭐', name: 'Sebulan Juara',     description: '30 hari berturut-turut' },
+  { id: 'streak_100',     emoji: '👑', name: 'Legenda',           description: '100 hari berturut-turut' },
+  { id: 'words_25',       emoji: '📖', name: '25 Kata',           description: 'Kuasai 25 kata' },
+  { id: 'words_50',       emoji: '📚', name: '50 Kata',           description: 'Kuasai 50 kata' },
+  { id: 'words_100',      emoji: '🎓', name: '100 Kata',          description: 'Kuasai 100 kata' },
+  { id: 'words_all',      emoji: '🏅', name: 'Semua Kata!',       description: 'Kuasai semua 150 kata' },
+  { id: 'unit_1',         emoji: '🏆', name: 'Unit 1 Tamat',      description: 'Selesaikan Unit 1' },
+  { id: 'unit_4',         emoji: '🏆', name: 'Unit 4 Tamat',      description: 'Selesaikan Unit 4' },
+  { id: 'unit_8',         emoji: '🏆', name: 'Tamat Semua!',      description: 'Selesaikan semua Unit' },
+  { id: 'reviewer_50',    emoji: '🧠', name: 'Review Master',     description: 'Review 50 kata' },
+  { id: 'comeback',       emoji: '🔄', name: 'Comeback!',         description: 'Kembali setelah streak putus' },
+  { id: 'battle_winner',  emoji: '🥊', name: 'Battle Winner',     description: 'Menang battle pertama' },
+];
+module.exports = badges;

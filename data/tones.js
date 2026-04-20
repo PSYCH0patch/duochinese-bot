@@ -1,0 +1,23 @@
+const tones = [
+  { id: 1,  hanzi: '妈', tone: 1, pinyin: 'mā', arti: 'ibu',        audio: 'mā (nada 1 — datar tinggi)' },
+  { id: 2,  hanzi: '麻', tone: 2, pinyin: 'má', arti: 'rami/wijen', audio: 'má (nada 2 — naik)' },
+  { id: 3,  hanzi: '马', tone: 3, pinyin: 'mǎ', arti: 'kuda',       audio: 'mǎ (nada 3 — turun naik)' },
+  { id: 4,  hanzi: '骂', tone: 4, pinyin: 'mà', arti: 'memaki',     audio: 'mà (nada 4 — turun tajam)' },
+  { id: 5,  hanzi: '书', tone: 1, pinyin: 'shū', arti: 'buku',      audio: 'shū (nada 1)' },
+  { id: 6,  hanzi: '熟', tone: 2, pinyin: 'shú', arti: 'matang',    audio: 'shú (nada 2)' },
+  { id: 7,  hanzi: '鼠', tone: 3, pinyin: 'shǔ', arti: 'tikus',     audio: 'shǔ (nada 3)' },
+  { id: 8,  hanzi: '树', tone: 4, pinyin: 'shù', arti: 'pohon',     audio: 'shù (nada 4)' },
+  { id: 9,  hanzi: '鸡', tone: 1, pinyin: 'jī',  arti: 'ayam',      audio: 'jī (nada 1)' },
+  { id: 10, hanzi: '及', tone: 2, pinyin: 'jí',  arti: 'mencapai',  audio: 'jí (nada 2)' },
+  { id: 11, hanzi: '己', tone: 3, pinyin: 'jǐ',  arti: 'diri',      audio: 'jǐ (nada 3)' },
+  { id: 12, hanzi: '记', tone: 4, pinyin: 'jì',  arti: 'mengingat', audio: 'jì (nada 4)' },
+  { id: 13, hanzi: '天', tone: 1, pinyin: 'tiān', arti: 'langit/hari', audio: 'tiān (nada 1)' },
+  { id: 14, hanzi: '田', tone: 2, pinyin: 'tián', arti: 'sawah',    audio: 'tián (nada 2)' },
+  { id: 15, hanzi: '舔', tone: 3, pinyin: 'tiǎn', arti: 'menjilat', audio: 'tiǎn (nada 3)' },
+  { id: 16, hanzi: '填', tone: 4, pinyin: 'tiàn', arti: 'mengisi',  audio: 'tiàn (nada 4)' },
+  { id: 17, hanzi: '高', tone: 1, pinyin: 'gāo', arti: 'tinggi',    audio: 'gāo (nada 1)' },
+  { id: 18, hanzi: '好', tone: 3, pinyin: 'hǎo', arti: 'baik',      audio: 'hǎo (nada 3)' },
+  { id: 19, hanzi: '号', tone: 4, pinyin: 'hào', arti: 'nomor',     audio: 'hào (nada 4)' },
+  { id: 20, hanzi: '河', tone: 2, pinyin: 'hé',  arti: 'sungai',    audio: 'hé (nada 2)' },
+];
+module.exports = tones;
