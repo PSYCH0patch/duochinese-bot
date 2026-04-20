@@ -1,5 +1,5 @@
 require('dotenv').config();
-const { Client, GatewayIntentBits, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ModalBuilder, TextInputBuilder, TextInputStyle } = require('discord.js');
+const { Client, GatewayIntentBits, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ModalBuilder, TextInputBuilder, TextInputStyle, MessageFlags } = require('discord.js');
 const Database = require('better-sqlite3');
 const path = require('path');
 
@@ -313,11 +313,11 @@ async function handleMulai(interaction) {
   ensureUser(userId,interaction.user.username); updateStreak(userId);
   db.prepare('UPDATE users SET current_unit=1,current_lesson=1 WHERE user_id=?').run(userId);
   const lesson=allLessonsN[0];
-  if (!lesson) return interaction.reply({content:'❌ Lesson tidak ditemukan.',ephemeral:true});
+  if (!lesson) return interaction.reply({content:'❌ Lesson tidak ditemukan.',flags:MessageFlags.Ephemeral});
   const hearts=checkHearts(userId);
-  if (hearts<=0) return interaction.reply({content:`💔 Nyawa habis! Tunggu 1 jam atau /review.\n${heartsDisplay(0)}`,ephemeral:true});
+  if (hearts<=0) return interaction.reply({content:`💔 Nyawa habis! Tunggu 1 jam atau /review.\n${heartsDisplay(0)}`,flags:MessageFlags.Ephemeral});
   const lessonWords=lesson.wordIds.map(id=>allWords.find(w=>w.id===id)).filter(Boolean);
-  if (!lessonWords.length) return interaction.reply({content:'❌ Tidak ada kata.',ephemeral:true});
+  if (!lessonWords.length) return interaction.reply({content:'❌ Tidak ada kata.',flags:MessageFlags.Ephemeral});
   const qs=shuffle(lesson.isBoss?lessonWords:lessonWords.slice(0,5)).map(w=>generateQuestion(w,allWords));
   sessions.set(userId,{lessonId:lesson.id,questions:qs,current:0,score:0,startTime:Date.now(),guildId:interaction.guildId});
   const {embed,row}=buildUI(qs[0],1,qs.length,hearts,`Unit ${lesson.unit} • ${lesson.nama}`);
@@ -329,13 +329,13 @@ async function handleLanjut(interaction) {
   const userId=interaction.user.id;
   const user=ensureUser(userId,interaction.user.username); updateStreak(userId);
   const hearts=checkHearts(userId);
-  if (hearts<=0) return interaction.reply({content:`💔 Nyawa habis!\n${heartsDisplay(0)}`,ephemeral:true});
+  if (hearts<=0) return interaction.reply({content:`💔 Nyawa habis!\n${heartsDisplay(0)}`,flags:MessageFlags.Ephemeral});
 
   const lesson=allLessonsN.find(l=>l.id===(user.current_lesson||1))||allLessonsN[0];
-  if (!lesson) return interaction.reply({content:'🎉 Semua lesson selesai!',ephemeral:true});
+  if (!lesson) return interaction.reply({content:'🎉 Semua lesson selesai!',flags:MessageFlags.Ephemeral});
 
   const lessonWords=lesson.wordIds.map(id=>allWords.find(w=>w.id===id)).filter(Boolean);
-  if (!lessonWords.length) return interaction.reply({content:'❌ Tidak ada kata.',ephemeral:true});
+  if (!lessonWords.length) return interaction.reply({content:'❌ Tidak ada kata.',flags:MessageFlags.Ephemeral});
 
   const adaptive = getAdaptiveLessonWords(userId, lessonWords, lesson.isBoss);
   const qs = adaptive.words.map(w=>generateQuestion(w,allWords));
@@ -368,7 +368,7 @@ async function handleReview(interaction) {
   if (!adaptive.words.length) {
     return interaction.reply({
       content:'✅ Tidak ada kata yang perlu di-review sekarang! Gunakan /lanjut untuk belajar.',
-      ephemeral:true
+      flags:MessageFlags.Ephemeral
     });
   }
 
@@ -503,7 +503,7 @@ async function handleLeaderboard(interaction) {
     rows=db.prepare('SELECT username,xp,streak FROM users ORDER BY xp DESC LIMIT 10').all();
     title='🏆 Leaderboard Global';
   }
-  if (!rows.length) return interaction.reply({content:'Belum ada data!',ephemeral:true});
+  if (!rows.length) return interaction.reply({content:'Belum ada data!',flags:MessageFlags.Ephemeral});
   const medals=['🥇','🥈','🥉'];
   const list=rows.map((r,i)=>`${i<3?medals[i]:`${i+1}.`} **${r.username}** — ${r.xp||0} XP ${getLevel(r.xp||0).emoji} 🔥${r.streak||0}`).join('\n');
   await interaction.reply({embeds:[new EmbedBuilder().setColor(0xf1c40f).setTitle(title).setDescription(list)]});
@@ -556,7 +556,7 @@ async function handleGrammar(interaction) {
     return interaction.reply({embeds:[new EmbedBuilder().setColor(0x3498db).setTitle('📖 Daftar Grammar').setDescription(list.slice(0,4096))]});
   }
   const g=allGrammarN.find(gr=>gr.id===nomor);
-  if (!g) return interaction.reply({content:`❌ Grammar ${nomor} tidak ada. Tersedia 1-${allGrammarN.length}`,ephemeral:true});
+  if (!g) return interaction.reply({content:`❌ Grammar ${nomor} tidak ada. Tersedia 1-${allGrammarN.length}`,flags:MessageFlags.Ephemeral});
   await interaction.reply({embeds:[new EmbedBuilder().setColor(0x3498db).setTitle(`📖 ${g.judul}`).setDescription((g.penjelasan||'').slice(0,4096)).setFooter({text:g.level})]});
 }
 
@@ -584,7 +584,7 @@ async function handleToneTrain(interaction) {
 
 async function handleSusun(interaction) {
   const userId=interaction.user.id; ensureUser(userId,interaction.user.username); updateStreak(userId);
-  if (!susun.length) return interaction.reply({content:'❌ Data susun tidak tersedia.',ephemeral:true});
+  if (!susun.length) return interaction.reply({content:'❌ Data susun tidak tersedia.',flags:MessageFlags.Ephemeral});
   const soal=susun[Math.floor(Math.random()*susun.length)];
   const shuffled=shuffle([...(soal.kata||[])]);
   sessions.set(userId,{type:'susun',jawaban:soal.jawaban,arti:soal.arti,startTime:Date.now(),guildId:interaction.guildId,ownerId:userId});
@@ -595,24 +595,24 @@ async function handleSusun(interaction) {
 async function handleKamus(interaction) {
   const kata=interaction.options.getString('kata').toLowerCase();
   const res=allWords.filter(w=>w.hanzi.includes(kata)||w.pinyin.toLowerCase().includes(kata)||w.arti.toLowerCase().includes(kata)).slice(0,8);
-  if (!res.length) return interaction.reply({content:`❌ "${kata}" tidak ditemukan.`,ephemeral:true});
+  if (!res.length) return interaction.reply({content:`❌ "${kata}" tidak ditemukan.`,flags:MessageFlags.Ephemeral});
   const list=res.map(w=>`**${w.hanzi}** (${w.pinyin}) — ${w.arti}\n📝 ${w.contoh} *"${w.contoh_arti}"*\nUnit ${w.unit} • HSK ${w.id<=150?1:2}`).join('\n\n');
   await interaction.reply({embeds:[new EmbedBuilder().setColor(0x3498db).setTitle(`📖 Kamus: "${kata}"`).setDescription(list.slice(0,4096)).setFooter({text:`${res.length} hasil`})]});
 }
 
 async function handleReminder(interaction) {
   const jam=interaction.options.getString('jam');
-  if (!/^\d{1,2}:\d{2}$/.test(jam)) return interaction.reply({content:'❌ Format: HH:MM (contoh: 20:00)',ephemeral:true});
+  if (!/^\d{1,2}:\d{2}$/.test(jam)) return interaction.reply({content:'❌ Format: HH:MM (contoh: 20:00)',flags:MessageFlags.Ephemeral});
   ensureUser(interaction.user.id,interaction.user.username);
   db.prepare('UPDATE users SET reminder_time=?,reminder_channel=? WHERE user_id=?').run(jam,interaction.channelId,interaction.user.id);
-  await interaction.reply({content:`⏰ Reminder diset jam **${jam}**!`,ephemeral:true});
+  await interaction.reply({content:`⏰ Reminder diset jam **${jam}**!`,flags:MessageFlags.Ephemeral});
 }
 
 async function handleDaily(interaction) {
   const userId=interaction.user.id;
   const user=ensureUser(userId,interaction.user.username);
   const today=todayStr();
-  if (user.daily_claimed===today) return interaction.reply({content:'🎁 Sudah klaim hari ini! Coba lagi besok.',ephemeral:true});
+  if (user.daily_claimed===today) return interaction.reply({content:'🎁 Sudah klaim hari ini! Coba lagi besok.',flags:MessageFlags.Ephemeral});
   const streak=updateStreak(userId);
   const reward=getDailyReward(streak);
   db.prepare('UPDATE users SET daily_claimed=?,total_daily_claims=COALESCE(total_daily_claims,0)+1 WHERE user_id=?').run(today,userId);
@@ -625,7 +625,7 @@ async function handleDaily(interaction) {
 
 async function handleTebakEmoji(interaction) {
   const userId=interaction.user.id; ensureUser(userId,interaction.user.username); updateStreak(userId);
-  if (!emojiGame.length) return interaction.reply({content:'❌ Data emoji game tidak tersedia.',ephemeral:true});
+  if (!emojiGame.length) return interaction.reply({content:'❌ Data emoji game tidak tersedia.',flags:MessageFlags.Ephemeral});
   const data=shuffle(emojiGame).slice(0,5);
   const qs=data.map(eg=>({type:'emoji',question:`Emoji ini menunjukkan apa?\n\n# ${eg.emoji}\n💡 *${eg.hint}*`,options:shuffle(eg.opsi.map(o=>({label:o,value:o===eg.jawaban?`correct_e_${eg.jawaban}`:`wrong_e_${o}`,correct:o===eg.jawaban}))),word:{hanzi:eg.jawaban,pinyin:'',arti:eg.hint,id:null}}));
   sessions.set(userId,{lessonId:'emoji',questions:qs,current:0,score:0,startTime:Date.now(),guildId:interaction.guildId,isEmoji:true,ownerId:userId});
@@ -636,10 +636,10 @@ async function handleTebakEmoji(interaction) {
 
 async function handleWordSearch(interaction) {
   const userId=interaction.user.id; ensureUser(userId,interaction.user.username); updateStreak(userId);
-  if (!wordsearchPools.length) return interaction.reply({content:'❌ Data word search tidak tersedia.',ephemeral:true});
+  if (!wordsearchPools.length) return interaction.reply({content:'❌ Data word search tidak tersedia.',flags:MessageFlags.Ephemeral});
   const pool=wordsearchPools[Math.floor(Math.random()*wordsearchPools.length)];
   const {grid,placed}=generateWordSearchGrid(pool.words,pool.fillers,6);
-  if (!placed.length) return interaction.reply({content:'❌ Gagal generate grid. Coba lagi!',ephemeral:true});
+  if (!placed.length) return interaction.reply({content:'❌ Gagal generate grid. Coba lagi!',flags:MessageFlags.Ephemeral});
   wordsearchSessions.set(userId,{grid,placed,found:[],startTime:Date.now(),guildId:interaction.guildId,ownerId:userId});
   await interaction.reply({embeds:[new EmbedBuilder().setColor(0x9b59b6).setTitle(`🔍 Word Search — ${pool.tema}`).setDescription(`Cari **${placed.length}** kata!\n\n${renderGrid(grid)}`).addFields({name:'💡 Cara main',value:'Klik Tebak Kata lalu ketik hanzinya'})],
     components:[new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('ws_guess').setLabel('🔍 Tebak Kata').setStyle(ButtonStyle.Primary),new ButtonBuilder().setCustomId('ws_hint').setLabel('💡 Hint').setStyle(ButtonStyle.Secondary),new ButtonBuilder().setCustomId('ws_giveup').setLabel('🏳️ Menyerah').setStyle(ButtonStyle.Danger))]});
@@ -659,8 +659,8 @@ async function handleSpeedRound(interaction) {
 async function handleBattle(interaction) {
   const userId=interaction.user.id;
   const target=interaction.options.getUser('lawan');
-  if (target.id===userId) return interaction.reply({content:'❌ Tidak bisa battle sendiri!',ephemeral:true});
-  if (target.bot) return interaction.reply({content:'❌ Tidak bisa battle dengan bot!',ephemeral:true});
+  if (target.id===userId) return interaction.reply({content:'❌ Tidak bisa battle sendiri!',flags:MessageFlags.Ephemeral});
+  if (target.bot) return interaction.reply({content:'❌ Tidak bisa battle dengan bot!',flags:MessageFlags.Ephemeral});
   ensureUser(userId,interaction.user.username); ensureUser(target.id,target.username);
   const qs=shuffle(allWords).slice(0,5).map(w=>generateQuestion(w,allWords));
   const res=db.prepare("INSERT INTO battles (challenger_id,challenged_id,total_q,questions,status) VALUES (?,?,5,?,'pending')").run(userId,target.id,JSON.stringify(qs));
@@ -671,12 +671,12 @@ async function handleBattle(interaction) {
 }
 
 async function handleSetupRoles(interaction) {
-  if (!interaction.guild) return interaction.reply({ content: '❌ Hanya bisa dipakai di server.', ephemeral: true });
+  if (!interaction.guild) return interaction.reply({ content: '❌ Hanya bisa dipakai di server.', flags: MessageFlags.Ephemeral });
   if (!interaction.memberPermissions?.has(0x20n) && !interaction.memberPermissions?.has(0x8n)) {
-    return interaction.reply({ content: '❌ Kamu butuh permission **Manage Server** atau **Admin**.', ephemeral: true });
+    return interaction.reply({ content: '❌ Kamu butuh permission **Manage Server** atau **Admin**.', flags: MessageFlags.Ephemeral });
   }
   const res = await ensureRoles(interaction.guild);
-  if (!res.ok) return interaction.reply({ content: '❌ Bot tidak punya permission **Manage Roles**. Cek role bot di server settings.', ephemeral: true });
+  if (!res.ok) return interaction.reply({ content: '❌ Bot tidak punya permission **Manage Roles**. Cek role bot di server settings.', flags: MessageFlags.Ephemeral });
   const { EmbedBuilder } = require('discord.js');
   const embed = new EmbedBuilder()
     .setColor(0x2ecc71).setTitle('🎭 Setup Level Roles Selesai!')
@@ -685,22 +685,22 @@ async function handleSetupRoles(interaction) {
       { name: '📋 Sudah ada', value: res.existing.length ? `${res.existing.length} role` : '0', inline: false },
       { name: '💡 Next', value: 'Gunakan /syncroles untuk sinkron semua user', inline: false },
     );
-  return interaction.reply({ embeds: [embed], ephemeral: true });
+  return interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
 }
 
 async function handleSyncRoles(interaction) {
-  if (!interaction.guild) return interaction.reply({ content: '❌ Hanya bisa dipakai di server.', ephemeral: true });
+  if (!interaction.guild) return interaction.reply({ content: '❌ Hanya bisa dipakai di server.', flags: MessageFlags.Ephemeral });
   if (!interaction.memberPermissions?.has(0x20n) && !interaction.memberPermissions?.has(0x8n)) {
-    return interaction.reply({ content: '❌ Kamu butuh permission **Manage Server** atau **Admin**.', ephemeral: true });
+    return interaction.reply({ content: '❌ Kamu butuh permission **Manage Server** atau **Admin**.', flags: MessageFlags.Ephemeral });
   }
   const target = interaction.options?.getUser('user');
   if (target) {
     const row = db.prepare('SELECT level FROM users WHERE user_id = ?').get(target.id);
-    if (!row) return interaction.reply({ content: `❌ ${target.username} belum ada di database.`, ephemeral: true });
+    if (!row) return interaction.reply({ content: `❌ ${target.username} belum ada di database.`, flags: MessageFlags.Ephemeral });
     const ok = await syncRole(interaction.guild, target.id, row.level || 1);
-    return interaction.reply({ content: ok ? `✅ Role ${target.username} disinkronkan ke level ${row.level || 1}` : `⚠️ Gagal sync — pastikan bot punya Manage Roles dan role bot lebih tinggi dari level roles.`, ephemeral: true });
+    return interaction.reply({ content: ok ? `✅ Role ${target.username} disinkronkan ke level ${row.level || 1}` : `⚠️ Gagal sync — pastikan bot punya Manage Roles dan role bot lebih tinggi dari level roles.`, flags: MessageFlags.Ephemeral });
   }
-  await interaction.deferReply({ ephemeral: true });
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   const res = await syncAllRoles(interaction.guild, db);
   if (!res.ok) return interaction.editReply('❌ Bot tidak punya permission Manage Roles.');
   return interaction.editReply(`✅ Sync selesai!\n• Synced: ${res.synced}\n• Skipped: ${res.skipped}\n• Total member: ${res.total}`);
@@ -736,11 +736,11 @@ async function handleBuy(interaction) {
   const itemId = interaction.options.getString('item');
   const item = SHOP_ITEMS.find(i => i.id === itemId);
 
-  if (!item) return interaction.reply({ content: '❌ Item tidak ditemukan.', ephemeral: true });
+  if (!item) return interaction.reply({ content: '❌ Item tidak ditemukan.', flags: MessageFlags.Ephemeral });
   if ((user.xp || 0) < item.cost) {
     return interaction.reply({
       content: '❌ XP tidak cukup! Kamu punya **' + (user.xp || 0) + ' XP**, butuh **' + item.cost + ' XP**.\nTerus belajar untuk dapat lebih banyak XP! 📚',
-      ephemeral: true
+      flags: MessageFlags.Ephemeral
     });
   }
 
@@ -861,7 +861,7 @@ async function handleWeekly(interaction) {
 
 async function handleDbStats(interaction) {
   const isAdmin = interaction.memberPermissions?.has(0x8n) || interaction.user.id === interaction.guild?.ownerId;
-  if (!isAdmin) return interaction.reply({ content: '❌ Admin only.', ephemeral: true });
+  if (!isAdmin) return interaction.reply({ content: '❌ Admin only.', flags: MessageFlags.Ephemeral });
 
   const totalUsers   = db.prepare('SELECT COUNT(*) as c FROM users').get().c;
   const totalWords   = db.prepare('SELECT COUNT(*) as c FROM words').get().c;
@@ -875,7 +875,7 @@ async function handleDbStats(interaction) {
   const topUsers     = db.prepare('SELECT username, xp, streak FROM users ORDER BY xp DESC LIMIT 5').all();
   const globalAcc    = totalReviews > 0 ? Math.round((totalCorrect / totalReviews) * 100) + '%' : '-';
 
-  await interaction.reply({ ephemeral: true, embeds: [new EmbedBuilder()
+  await interaction.reply({ flags: MessageFlags.Ephemeral, embeds: [new EmbedBuilder()
     .setColor(0x3498db).setTitle('📊 Database Stats')
     .addFields(
       { name: '👥 Users',           value: String(totalUsers),   inline: true },
@@ -900,7 +900,7 @@ async function handleBotInfo(interaction) {
   const rss  = Math.round(mem.rss / 1024 / 1024);
   const heap = Math.round(mem.heapUsed / 1024 / 1024);
 
-  await interaction.reply({ ephemeral: true, embeds: [new EmbedBuilder()
+  await interaction.reply({ flags: MessageFlags.Ephemeral, embeds: [new EmbedBuilder()
     .setColor(sessions.size > 20 ? 0xe74c3c : 0x2ecc71)
     .setTitle('🤖 Bot Health Check')
     .addFields(
@@ -919,11 +919,11 @@ async function handleBotInfo(interaction) {
 
 async function handleAdminUser(interaction) {
   const isAdmin = interaction.memberPermissions?.has(0x8n) || interaction.user.id === interaction.guild?.ownerId;
-  if (!isAdmin) return interaction.reply({ content: '❌ Admin only.', ephemeral: true });
+  if (!isAdmin) return interaction.reply({ content: '❌ Admin only.', flags: MessageFlags.Ephemeral });
 
   const target     = interaction.options.getUser('user');
   const user       = db.prepare('SELECT * FROM users WHERE user_id = ?').get(target.id);
-  if (!user) return interaction.reply({ content: '❌ ' + target.username + ' belum ada di database.', ephemeral: true });
+  if (!user) return interaction.reply({ content: '❌ ' + target.username + ' belum ada di database.', flags: MessageFlags.Ephemeral });
 
   const lvl        = getLevel(user.xp || 0);
   const wordCount  = db.prepare('SELECT COUNT(*) as c FROM user_words WHERE user_id = ? AND times_correct >= 3').get(target.id).c;
@@ -956,7 +956,7 @@ async function handleAdminUser(interaction) {
     embed.addFields({ name: '❌ Sering Salah', value: wrongMost.map(w => w.hanzi + ' (' + w.pinyin + ') ❌' + w.times_wrong + ' ✅' + w.times_correct).join('\n') });
   }
 
-  await interaction.reply({ embeds: [embed], ephemeral: true });
+  await interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
 }
 
 
@@ -971,13 +971,13 @@ async function handleNotif(interaction) {
       .run(interaction.channelId, userId);
     return interaction.reply({
       content: '🔔 Notifikasi **diaktifkan** di channel ini!\n\nKamu akan mendapat notif untuk:\n• 📚 Review queue menumpuk\n• 🔥 Streak terancam putus\n• ⚡ Double XP hampir habis\n• ❤️ Nyawa sudah penuh',
-      ephemeral: true
+      flags: MessageFlags.Ephemeral
     });
   }
 
   if (action === 'off') {
     db.prepare("UPDATE users SET notif_enabled = 0 WHERE user_id = ?").run(userId);
-    return interaction.reply({ content: '🔕 Notifikasi **dimatikan**.', ephemeral: true });
+    return interaction.reply({ content: '🔕 Notifikasi **dimatikan**.', flags: MessageFlags.Ephemeral });
   }
 
   // Status
@@ -994,7 +994,7 @@ async function handleNotif(interaction) {
     : 'Belum ada notifikasi';
 
   await interaction.reply({
-    ephemeral: true,
+    flags: MessageFlags.Ephemeral,
     embeds: [new EmbedBuilder()
       .setColor(enabled ? 0x2ecc71 : 0x95a5a6)
       .setTitle('🔔 Status Notifikasi')
@@ -1011,16 +1011,16 @@ async function handleButton(interaction) {
   const userId=interaction.user.id; const cid=interaction.customId;
   if (cid==='susun_answer') {
     const s=sessions.get(userId);
-    if (!s||s.type!=='susun') return interaction.reply({content:'❌ Sesi tidak ditemukan.',ephemeral:true});
-    if (s.ownerId && s.ownerId !== userId) return interaction.reply({content:'❌ Ini bukan sesimu!',ephemeral:true});
+    if (!s||s.type!=='susun') return interaction.reply({content:'❌ Sesi tidak ditemukan.',flags:MessageFlags.Ephemeral});
+    if (s.ownerId && s.ownerId !== userId) return interaction.reply({content:'❌ Ini bukan sesimu!',flags:MessageFlags.Ephemeral});
     const modal=new ModalBuilder().setCustomId('susun_modal').setTitle('Susun Kalimat');
     modal.addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('susun_input').setLabel('Ketik kalimat yang benar').setStyle(TextInputStyle.Short).setRequired(true)));
     return interaction.showModal(modal);
   }
   if (cid==='speed_start') {
     const s=speedSessions.get(userId);
-    if (!s) return interaction.reply({content:'❌ Sesi tidak ditemukan.',ephemeral:true});
-    if (s.ownerId && s.ownerId !== userId) return interaction.reply({content:'❌ Ini bukan sesimu!',ephemeral:true});
+    if (!s) return interaction.reply({content:'❌ Sesi tidak ditemukan.',flags:MessageFlags.Ephemeral});
+    if (s.ownerId && s.ownerId !== userId) return interaction.reply({content:'❌ Ini bukan sesimu!',flags:MessageFlags.Ephemeral});
     s.questionStartTime=Date.now(); const {embed,row}=buildUI(s.questions[0],1,10,checkHearts(userId),'⚡ SPEED ROUND');
     return interaction.update({embeds:[embed],components:[row]});
   }
@@ -1031,23 +1031,23 @@ async function handleButton(interaction) {
   }
   if (cid==='ws_hint') {
     const s=wordsearchSessions.get(userId);
-    if (!s) return interaction.reply({content:'❌ Sesi tidak ditemukan.',ephemeral:true});
-    if (s.ownerId && s.ownerId !== userId) return interaction.reply({content:'❌ Ini bukan sesimu!',ephemeral:true});
+    if (!s) return interaction.reply({content:'❌ Sesi tidak ditemukan.',flags:MessageFlags.Ephemeral});
+    if (s.ownerId && s.ownerId !== userId) return interaction.reply({content:'❌ Ini bukan sesimu!',flags:MessageFlags.Ephemeral});
     const rem=s.placed.filter(p=>!s.found.includes(p.word));
-    if (!rem.length) return interaction.reply({content:'✅ Semua kata sudah ditemukan!',ephemeral:true});
-    return interaction.reply({content:`💡 **${rem[0].word.length}** karakter, arah ${rem[0].dir==='h'?'horizontal →':'vertikal ↓'}`,ephemeral:true});
+    if (!rem.length) return interaction.reply({content:'✅ Semua kata sudah ditemukan!',flags:MessageFlags.Ephemeral});
+    return interaction.reply({content:`💡 **${rem[0].word.length}** karakter, arah ${rem[0].dir==='h'?'horizontal →':'vertikal ↓'}`,flags:MessageFlags.Ephemeral});
   }
   if (cid==='ws_giveup') {
     const s=wordsearchSessions.get(userId);
-    if (!s) return interaction.reply({content:'❌ Sesi tidak ditemukan.',ephemeral:true});
-    if (s.ownerId && s.ownerId !== userId) return interaction.reply({content:'❌ Ini bukan sesimu!',ephemeral:true});
+    if (!s) return interaction.reply({content:'❌ Sesi tidak ditemukan.',flags:MessageFlags.Ephemeral});
+    if (s.ownerId && s.ownerId !== userId) return interaction.reply({content:'❌ Ini bukan sesimu!',flags:MessageFlags.Ephemeral});
     wordsearchSessions.delete(userId);
     return interaction.update({embeds:[new EmbedBuilder().setColor(0xe74c3c).setTitle('🏳️ Menyerah').setDescription(`Jawabannya: **${s.placed.map(p=>p.word).join(', ')}**\nDitemukan: ${s.found.length}/${s.placed.length}`)],components:[]});
   }
   if (cid.startsWith('battle_accept_')) {
     const battleId=parseInt(cid.replace('battle_accept_','')); const b=battleSessions.get(battleId);
-    if (!b) return interaction.reply({content:'❌ Battle tidak ditemukan.',ephemeral:true});
-    if (userId!==b.challengedId) return interaction.reply({content:'❌ Bukan untukmu!',ephemeral:true});
+    if (!b) return interaction.reply({content:'❌ Battle tidak ditemukan.',flags:MessageFlags.Ephemeral});
+    if (userId!==b.challengedId) return interaction.reply({content:'❌ Bukan untukmu!',flags:MessageFlags.Ephemeral});
     b.phase='challenger_playing';
     const q=b.questions[0];
     const mkRow=(bId,qs,qi)=>new ActionRowBuilder().addComponents(qs[qi].options.map((opt,i)=>new ButtonBuilder().setCustomId(`ba_${bId}_${i}_${opt.correct?'c':'w'}`).setLabel(opt.label.slice(0,80)).setEmoji(['1️⃣','2️⃣','3️⃣','4️⃣'][i]).setStyle(ButtonStyle.Secondary)));
@@ -1056,10 +1056,10 @@ async function handleButton(interaction) {
   if (cid.startsWith('battle_decline_')) { battleSessions.delete(parseInt(cid.replace('battle_decline_',''))); return interaction.update({embeds:[new EmbedBuilder().setColor(0x95a5a6).setTitle('⚔️ Ditolak').setDescription('Tantangan ditolak.')],components:[]}); }
   if (cid.startsWith('ba_')) {
     const parts=cid.split('_'); const battleId=parseInt(parts[1]); const isCorrect=parts[3]==='c';
-    const b=battleSessions.get(battleId); if (!b) return interaction.reply({content:'❌ Battle tidak ditemukan.',ephemeral:true});
+    const b=battleSessions.get(battleId); if (!b) return interaction.reply({content:'❌ Battle tidak ditemukan.',flags:MessageFlags.Ephemeral});
     const isC=userId===b.challengerId; const isD=userId===b.challengedId;
-    if (b.phase==='challenger_playing'&&!isC) return interaction.reply({content:'❌ Bukan giliranmu!',ephemeral:true});
-    if (b.phase==='challenged_playing'&&!isD) return interaction.reply({content:'❌ Bukan giliranmu!',ephemeral:true});
+    if (b.phase==='challenger_playing'&&!isC) return interaction.reply({content:'❌ Bukan giliranmu!',flags:MessageFlags.Ephemeral});
+    if (b.phase==='challenged_playing'&&!isD) return interaction.reply({content:'❌ Bukan giliranmu!',flags:MessageFlags.Ephemeral});
     const mkRow=(bId,qs,qi)=>new ActionRowBuilder().addComponents(qs[qi].options.map((opt,i)=>new ButtonBuilder().setCustomId(`ba_${bId}_${i}_${opt.correct?'c':'w'}`).setLabel(opt.label.slice(0,80)).setEmoji(['1️⃣','2️⃣','3️⃣','4️⃣'][i]).setStyle(ButtonStyle.Secondary)));
     if (b.phase==='challenger_playing') {
       if(isCorrect) b.challengerScore++; b.currentQ++;
@@ -1087,7 +1087,7 @@ async function handleButton(interaction) {
   if (cid.startsWith('correct_')||cid.startsWith('wrong_')) {
     const sp=speedSessions.get(userId);
     if (sp) {
-      if (sp.ownerId && sp.ownerId !== userId) return interaction.reply({content:'❌ Ini bukan sesimu!',ephemeral:true});
+      if (sp.ownerId && sp.ownerId !== userId) return interaction.reply({content:'❌ Ini bukan sesimu!',flags:MessageFlags.Ephemeral});
       const isCorrect=cid.startsWith('correct_'); const elapsed=(Date.now()-sp.questionStartTime)/1000;
       sp.times.push(elapsed); if(isCorrect) sp.score++; sp.current++;
       if (sp.current>=10) {
@@ -1099,8 +1099,8 @@ async function handleButton(interaction) {
       return interaction.update({embeds:[new EmbedBuilder().setColor(0xff0000).setTitle(`⚡ Speed ${sp.current+1}/10`).setDescription(`${isCorrect?'✅':'❌'} (${elapsed.toFixed(1)}s)\n\n${q.question}`).setFooter({text:`Skor: ${sp.score} | Cepat = bonus XP!`})],components:[new ActionRowBuilder().addComponents(q.options.map((opt,i)=>new ButtonBuilder().setCustomId(opt.value).setLabel(opt.label.slice(0,80)).setEmoji(['1️⃣','2️⃣','3️⃣','4️⃣'][i]).setStyle(ButtonStyle.Secondary)))]});
     }
     const session=sessions.get(userId);
-    if (!session||session.type==='susun') return interaction.reply({content:'❌ Sesi tidak ditemukan. /mulai untuk mulai',ephemeral:true});
-    if (session.ownerId && session.ownerId !== userId) return interaction.reply({content:'❌ Ini bukan sesimu! Gunakan /mulai untuk sesi sendiri.',ephemeral:true});
+    if (!session||session.type==='susun') return interaction.reply({content:'❌ Sesi tidak ditemukan. /mulai untuk mulai',flags:MessageFlags.Ephemeral});
+    if (session.ownerId && session.ownerId !== userId) return interaction.reply({content:'❌ Ini bukan sesimu! Gunakan /mulai untuk sesi sendiri.',flags:MessageFlags.Ephemeral});
     const isCorrect=cid.startsWith('correct_'); const curQ=session.questions[session.current]; let hearts=checkHearts(userId);
     if (curQ.word&&curQ.word.id) {
       const wid=curQ.word.id; const ex=db.prepare('SELECT * FROM user_words WHERE user_id=? AND word_id=?').get(userId,wid);
@@ -1133,8 +1133,8 @@ async function handleModal(interaction) {
   const userId=interaction.user.id;
   if (interaction.customId==='susun_modal') {
     const s=sessions.get(userId);
-    if (!s||s.type!=='susun') return interaction.reply({content:'❌ Sesi tidak ditemukan.',ephemeral:true});
-    if (s.ownerId && s.ownerId !== userId) return interaction.reply({content:'❌ Ini bukan sesimu!',ephemeral:true});
+    if (!s||s.type!=='susun') return interaction.reply({content:'❌ Sesi tidak ditemukan.',flags:MessageFlags.Ephemeral});
+    if (s.ownerId && s.ownerId !== userId) return interaction.reply({content:'❌ Ini bukan sesimu!',flags:MessageFlags.Ephemeral});
     const answer=interaction.fields.getTextInputValue('susun_input').trim();
     const sim=similarity(answer,s.jawaban); const elapsed=Math.round((Date.now()-s.startTime)/1000);
     let xp=2,title='❌ Coba lagi!';
@@ -1144,8 +1144,8 @@ async function handleModal(interaction) {
   }
   if (interaction.customId==='ws_guess_modal') {
     const s=wordsearchSessions.get(userId);
-    if (!s) return interaction.reply({content:'❌ Sesi tidak ditemukan.',ephemeral:true});
-    if (s.ownerId && s.ownerId !== userId) return interaction.reply({content:'❌ Ini bukan sesimu!',ephemeral:true});
+    if (!s) return interaction.reply({content:'❌ Sesi tidak ditemukan.',flags:MessageFlags.Ephemeral});
+    if (s.ownerId && s.ownerId !== userId) return interaction.reply({content:'❌ Ini bukan sesimu!',flags:MessageFlags.Ephemeral});
     const guess=interaction.fields.getTextInputValue('ws_input').trim();
     const found=s.placed.find(p=>p.word===guess&&!s.found.includes(p.word));
     if (found) {
@@ -1155,9 +1155,9 @@ async function handleModal(interaction) {
         addXp(userId,xp,s.guildId); wordsearchSessions.delete(userId); checkAndAwardBadges(userId);
         return interaction.reply({embeds:[new EmbedBuilder().setColor(0x2ecc71).setTitle('🎉 Semua ditemukan!').setDescription(`Kata: ${s.placed.map(p=>p.word).join(', ')}\nWaktu: ${elapsed}s | +${xp} XP`)]});
       }
-      return interaction.reply({content:`✅ **${guess}** ditemukan! (${s.found.length}/${s.placed.length})`,ephemeral:true});
+      return interaction.reply({content:`✅ **${guess}** ditemukan! (${s.found.length}/${s.placed.length})`,flags:MessageFlags.Ephemeral});
     }
-    return interaction.reply({content:s.found.includes(guess)?`⚠️ **${guess}** sudah ditemukan!`:`❌ **${guess}** bukan kata tersembunyi!`,ephemeral:true});
+    return interaction.reply({content:s.found.includes(guess)?`⚠️ **${guess}** sudah ditemukan!`:`❌ **${guess}** bukan kata tersembunyi!`,flags:MessageFlags.Ephemeral});
   }
 }
 
@@ -1256,7 +1256,7 @@ client.on('interactionCreate', async (interaction) => {
     if (interaction.isModalSubmit()) return handleModal(interaction);
   } catch (err) {
     console.error('❌ Error:', err);
-    const msg={content:'❌ Terjadi error. Coba lagi.',ephemeral:true};
+    const msg={content:'❌ Terjadi error. Coba lagi.',flags:MessageFlags.Ephemeral};
     try { interaction.replied||interaction.deferred?await interaction.followUp(msg):await interaction.reply(msg); } catch(e){}
   }
 });
