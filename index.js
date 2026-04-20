@@ -195,11 +195,14 @@ function generateQuestion(word, pool, type=null) {
   }
 }
 
-function buildUI(question, qNum, totalQ, hearts, label='') {
+function buildUI(question, qNum, totalQ, hearts, label='', ownerId='') {
   const emojis=['1️⃣','2️⃣','3️⃣','4️⃣'];
   return {
     embed: new EmbedBuilder().setColor(0x3498db).setTitle(`📝 Soal ${qNum}/${totalQ}`).setDescription(question.question).setFooter({text:`${heartsDisplay(hearts)} ${label}`}),
-    row: new ActionRowBuilder().addComponents(question.options.map((opt,i)=>new ButtonBuilder().setCustomId(opt.value).setLabel(opt.label.slice(0,80)).setEmoji(emojis[i]).setStyle(ButtonStyle.Secondary)))
+    row: new ActionRowBuilder().addComponents(question.options.map((opt,i)=>{
+      const cid = (ownerId && ownerId !== '') ? opt.value + '_uid_' + ownerId : opt.value;
+      return new ButtonBuilder().setCustomId(cid.slice(0,100)).setLabel(opt.label.slice(0,80)).setEmoji(emojis[i]).setStyle(ButtonStyle.Secondary);
+    }))
   };
 }
 
@@ -320,7 +323,7 @@ async function handleMulai(interaction) {
   if (!lessonWords.length) return interaction.reply({content:'❌ Tidak ada kata.',flags:MessageFlags.Ephemeral});
   const qs=shuffle(lesson.isBoss?lessonWords:lessonWords.slice(0,5)).map(w=>generateQuestion(w,allWords));
   sessions.set(userId,{lessonId:lesson.id,questions:qs,current:0,score:0,startTime:Date.now(),guildId:interaction.guildId});
-  const {embed,row}=buildUI(qs[0],1,qs.length,hearts,`Unit ${lesson.unit} • ${lesson.nama}`);
+  const {embed,row}=buildUI(qs[0], 1, qs.length, hearts, `Unit ${lesson.unit} • ${lesson.nama}`, userId);
   await interaction.reply({embeds:[embed],components:[row]});
 }
 
@@ -354,7 +357,7 @@ async function handleLanjut(interaction) {
     ? `Unit ${lesson.unit} • ${lesson.nama} (+${adaptive.injectedWeak} review)`
     : `Unit ${lesson.unit} • ${lesson.nama}`;
 
-  const {embed,row}=buildUI(qs[0],1,qs.length,hearts,label);
+  const {embed,row}=buildUI(qs[0], 1, qs.length, hearts, label, userId);
   await interaction.reply({embeds:[embed],components:[row]});
 }
 
@@ -390,7 +393,7 @@ async function handleReview(interaction) {
   if (adaptive.dueCount > 0 && adaptive.weakMixed > 0) label = '🔄 Review Campuran';
   else if (adaptive.dueCount > 0) label = '🔄 Review SRS';
 
-  const ui = buildUI(qs[0], 1, qs.length, hearts, label);
+  const ui = buildUI(qs[0], 1, qs.length, hearts, label, userId);
   ui.embed.addFields({
     name:'Queue',
     value:'Due: ' + adaptive.dueCount + ' • Lemah: ' + adaptive.weakMixed,
@@ -578,7 +581,7 @@ async function handleToneTrain(interaction) {
   const qs=data.map(t=>({type:'tone',question:`Apa pinyin yang benar untuk **${t.hanzi}**?`,options:shuffle(t.opsi.map(o=>({label:o,value:o===t.jawaban?`correct_tone_${t.hanzi}`:`wrong_tone_${Buffer.from(o).toString('hex')}`,correct:o===t.jawaban}))),word:{hanzi:t.hanzi,pinyin:t.jawaban,arti:t.hanzi,id:null}}));
   sessions.set(userId,{lessonId:'tone',questions:qs,current:0,score:0,startTime:Date.now(),guildId:interaction.guildId,isTone:true,ownerId:userId});
   const hearts=checkHearts(userId);
-  const {embed,row}=buildUI(qs[0],1,5,hearts,'🎵 Tone Training');
+  const {embed,row}=buildUI(qs[0], 1, 5, hearts, '🎵 Tone Training', userId);
   await interaction.reply({embeds:[embed],components:[row]});
 }
 
@@ -630,7 +633,7 @@ async function handleTebakEmoji(interaction) {
   const qs=data.map(eg=>({type:'emoji',question:`Emoji ini menunjukkan apa?\n\n# ${eg.emoji}\n💡 *${eg.hint}*`,options:shuffle(eg.opsi.map(o=>({label:o,value:o===eg.jawaban?`correct_e_${eg.jawaban}`:`wrong_e_${o}`,correct:o===eg.jawaban}))),word:{hanzi:eg.jawaban,pinyin:'',arti:eg.hint,id:null}}));
   sessions.set(userId,{lessonId:'emoji',questions:qs,current:0,score:0,startTime:Date.now(),guildId:interaction.guildId,isEmoji:true,ownerId:userId});
   const hearts=checkHearts(userId);
-  const {embed,row}=buildUI(qs[0],1,5,hearts,'😃 Tebak Emoji');
+  const {embed,row}=buildUI(qs[0], 1, 5, hearts, '😃 Tebak Emoji', userId);
   await interaction.reply({embeds:[embed],components:[row]});
 }
 
@@ -1008,7 +1011,21 @@ async function handleNotif(interaction) {
 }
 
 async function handleButton(interaction) {
-  const userId=interaction.user.id; const cid=interaction.customId;
+  const userId=interaction.user.id;
+  let cid=interaction.customId;
+
+  // === OWNERSHIP CHECK — runs FIRST before anything else ===
+  if (cid.includes('_uid_')) {
+    const uidIdx = cid.lastIndexOf('_uid_');
+    const ownerId = cid.slice(uidIdx + 5);
+    cid = cid.slice(0, uidIdx);
+    if (ownerId !== userId) {
+      return interaction.reply({
+        content: '❌ Tombol ini milik orang lain! Gunakan /mulai untuk sesimu sendiri.',
+        flags: MessageFlags.Ephemeral
+      });
+    }
+  }
   if (cid==='susun_answer') {
     const s=sessions.get(userId);
     if (!s||s.type!=='susun') return interaction.reply({content:'❌ Sesi tidak ditemukan.',flags:MessageFlags.Ephemeral});
