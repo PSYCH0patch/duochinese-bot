@@ -48,6 +48,7 @@ const allChallengesN = allChallenges.map(normalizeChallenge);
 const allTonesN     = allTones.map(normalizeTone);
 
 const { shuffle, getLevel, xpBar, heartsDisplay, similarity, todayStr, generateWordSearchGrid, renderGrid, getWeakWords, getReviewWords, nextReviewDate, getDailyReward } = require('./utils/helpers');
+const { ensureRoles, syncRole, syncAllRoles } = require('./utils/roleSync');
 
 const db = new Database(path.join(__dirname, 'database', 'duochinese.db'));
 db.pragma('journal_mode = WAL');
@@ -87,7 +88,13 @@ function addXp(userId, amount, guildId=null) {
       db.prepare('INSERT INTO server_xp (user_id,guild_id,xp) VALUES (?,?,?)').run(userId, guildId, amount);
   }
   const {xp} = db.prepare('SELECT xp FROM users WHERE user_id=?').get(userId);
-  db.prepare('UPDATE users SET level=? WHERE user_id=?').run(getLevel(xp).level, userId);
+  const newLevel = getLevel(xp).level;
+  db.prepare('UPDATE users SET level=? WHERE user_id=?').run(newLevel, userId);
+  // Sync Discord role if in a guild
+  if (guildId) {
+    const guild = client.guilds.cache.get(guildId);
+    if (guild) syncRole(guild, userId, newLevel).catch(() => {});
+  }
 }
 
 function checkHearts(userId) {
@@ -444,6 +451,42 @@ async function handleBattle(interaction) {
     components:[new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId(`battle_accept_${battleId}`).setLabel('✅ Terima').setStyle(ButtonStyle.Success),new ButtonBuilder().setCustomId(`battle_decline_${battleId}`).setLabel('❌ Tolak').setStyle(ButtonStyle.Danger))]});
 }
 
+async function handleSetupRoles(interaction) {
+  if (!interaction.guild) return interaction.reply({ content: '❌ Hanya bisa dipakai di server.', ephemeral: true });
+  if (!interaction.memberPermissions?.has(0x20n) && !interaction.memberPermissions?.has(0x8n)) {
+    return interaction.reply({ content: '❌ Kamu butuh permission **Manage Server** atau **Admin**.', ephemeral: true });
+  }
+  const res = await ensureRoles(interaction.guild);
+  if (!res.ok) return interaction.reply({ content: '❌ Bot tidak punya permission **Manage Roles**. Cek role bot di server settings.', ephemeral: true });
+  const { EmbedBuilder } = require('discord.js');
+  const embed = new EmbedBuilder()
+    .setColor(0x2ecc71).setTitle('🎭 Setup Level Roles Selesai!')
+    .addFields(
+      { name: '✅ Role baru dibuat', value: res.created.length ? res.created.join('\n') : 'Tidak ada', inline: false },
+      { name: '📋 Sudah ada', value: res.existing.length ? `${res.existing.length} role` : '0', inline: false },
+      { name: '💡 Next', value: 'Gunakan /syncroles untuk sinkron semua user', inline: false },
+    );
+  return interaction.reply({ embeds: [embed], ephemeral: true });
+}
+
+async function handleSyncRoles(interaction) {
+  if (!interaction.guild) return interaction.reply({ content: '❌ Hanya bisa dipakai di server.', ephemeral: true });
+  if (!interaction.memberPermissions?.has(0x20n) && !interaction.memberPermissions?.has(0x8n)) {
+    return interaction.reply({ content: '❌ Kamu butuh permission **Manage Server** atau **Admin**.', ephemeral: true });
+  }
+  const target = interaction.options?.getUser('user');
+  if (target) {
+    const row = db.prepare('SELECT level FROM users WHERE user_id = ?').get(target.id);
+    if (!row) return interaction.reply({ content: `❌ ${target.username} belum ada di database.`, ephemeral: true });
+    const ok = await syncRole(interaction.guild, target.id, row.level || 1);
+    return interaction.reply({ content: ok ? `✅ Role ${target.username} disinkronkan ke level ${row.level || 1}` : `⚠️ Gagal sync — pastikan bot punya Manage Roles dan role bot lebih tinggi dari level roles.`, ephemeral: true });
+  }
+  await interaction.deferReply({ ephemeral: true });
+  const res = await syncAllRoles(interaction.guild, db);
+  if (!res.ok) return interaction.editReply('❌ Bot tidak punya permission Manage Roles.');
+  return interaction.editReply(`✅ Sync selesai!\n• Synced: ${res.synced}\n• Skipped: ${res.skipped}\n• Total member: ${res.total}`);
+}
+
 async function handleButton(interaction) {
   const userId=interaction.user.id; const cid=interaction.customId;
   if (cid==='susun_answer') {
@@ -607,7 +650,7 @@ client.on('interactionCreate', async (interaction) => {
         skillmap:handleSkillmap, grammar:handleGrammar, challenge:handleChallenge,
         tonetrain:handleToneTrain, susun:handleSusun, battle:handleBattle,
         kamus:handleKamus, reminder:handleReminder, daily:handleDaily,
-        tebakemoji:handleTebakEmoji, wordsearch:handleWordSearch, speedround:handleSpeedRound,
+        tebakemoji:handleTebakEmoji, wordsearch:handleWordSearch, speedround:handleSpeedRound, setuproles:handleSetupRoles, syncroles:handleSyncRoles,
       };
       return handlers[interaction.commandName]?.(interaction);
     }

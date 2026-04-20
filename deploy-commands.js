@@ -45,6 +45,12 @@ const commands = [
   new SlashCommandBuilder().setName('reminder')
     .setDescription('⏰ Set reminder belajar')
     .addStringOption(opt => opt.setName('jam').setDescription('Jam reminder (contoh: 20:00)').setRequired(true)),
+
+  // === ADMIN / ROLES ===
+  new SlashCommandBuilder().setName('setuproles').setDescription('🎭 Setup role level DuoChinese di server ini'),
+  new SlashCommandBuilder().setName('syncroles')
+    .setDescription('🔄 Sinkron role level semua user')
+    .addUserOption(opt => opt.setName('user').setDescription('Sinkron 1 user saja').setRequired(false)),
 ].map(cmd => cmd.toJSON());
 
 const rest = new REST({ version: '10' }).setToken(process.env.BOT_TOKEN);
