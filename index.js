@@ -150,7 +150,7 @@ function generateQuestion(word, pool, type=null) {
 }
 
 function buildUI(question, qNum, totalQ, hearts, label='') {
-  const emojis=['🅰️','🅱️','🅲','🅳'];
+  const emojis=['1️⃣','2️⃣','3️⃣','4️⃣'];
   return {
     embed: new EmbedBuilder().setColor(0x3498db).setTitle(`📝 Soal ${qNum}/${totalQ}`).setDescription(question.question).setFooter({text:`${heartsDisplay(hearts)} ${label}`}),
     row: new ActionRowBuilder().addComponents(question.options.map((opt,i)=>new ButtonBuilder().setCustomId(opt.value).setLabel(opt.label.slice(0,80)).setEmoji(emojis[i]).setStyle(ButtonStyle.Secondary)))
@@ -320,13 +320,31 @@ async function handleSkillmap(interaction) {
   const user=ensureUser(userId,interaction.user.username);
   const done=new Set(db.prepare('SELECT lesson_id FROM user_lessons WHERE user_id=? AND completed=1').all(userId).map(l=>l.lesson_id));
   const maxUnit=Math.max(...allLessonsN.map(l=>l.unit));
+
+  // Group units into chunks of 2 per embed to fit all 16 units in 8 embeds (Discord max 10)
   const embeds=[];
-  for (let u=1;u<=maxUnit;u++) {
-    const ul=allLessonsN.filter(l=>l.unit===u); if (!ul.length) continue;
-    const text=ul.map(l=>`${done.has(l.id)?'✅':l.id===(user.current_lesson||1)?'👉':'🔒'} L${l.id}: ${l.nama}${l.isBoss?' 🏆':''}`).join('\n');
-    embeds.push(new EmbedBuilder().setColor(u<=8?0x1abc9c:0xe67e22).setTitle(`Unit ${u} (HSK ${u<=8?1:2})`).setDescription(text));
+  for (let u=1;u<=maxUnit;u+=2) {
+    let desc='';
+    for (let uu=u;uu<=Math.min(u+1,maxUnit);uu++) {
+      const ul=allLessonsN.filter(l=>l.unit===uu);
+      if (!ul.length) continue;
+      const hsk=uu<=8?1:2;
+      desc+=`**Unit ${uu} (HSK ${hsk})**\n`;
+      desc+=ul.map(l=>`${done.has(l.id)?'✅':l.id===(user.current_lesson||1)?'👉':'🔒'} L${l.id}: ${l.nama}${l.isBoss?' 🏆':''}`).join('\n');
+      desc+='\n\n';
+    }
+    if (desc.trim()) {
+      const color=u<=8?0x1abc9c:0xe67e22;
+      embeds.push(new EmbedBuilder().setColor(color).setDescription(desc.slice(0,4096)));
+    }
     if (embeds.length>=10) break;
   }
+
+  // Set title on first embed
+  if (embeds.length>0) {
+    embeds[0].setTitle(`🗺️ Skill Map — ${interaction.user.username}`);
+  }
+
   await interaction.reply({embeds});
 }
 
@@ -522,7 +540,7 @@ async function handleButton(interaction) {
     if (userId!==b.challengedId) return interaction.reply({content:'❌ Bukan untukmu!',ephemeral:true});
     b.phase='challenger_playing';
     const q=b.questions[0];
-    const mkRow=(bId,qs,qi)=>new ActionRowBuilder().addComponents(qs[qi].options.map((opt,i)=>new ButtonBuilder().setCustomId(`ba_${bId}_${i}_${opt.correct?'c':'w'}`).setLabel(opt.label.slice(0,80)).setEmoji(['🅰️','🅱️','🅲','🅳'][i]).setStyle(ButtonStyle.Secondary)));
+    const mkRow=(bId,qs,qi)=>new ActionRowBuilder().addComponents(qs[qi].options.map((opt,i)=>new ButtonBuilder().setCustomId(`ba_${bId}_${i}_${opt.correct?'c':'w'}`).setLabel(opt.label.slice(0,80)).setEmoji(['1️⃣','2️⃣','3️⃣','4️⃣'][i]).setStyle(ButtonStyle.Secondary)));
     return interaction.update({embeds:[new EmbedBuilder().setColor(0xe74c3c).setTitle('⚔️ Battle — Giliran Challenger').setDescription(q.question).setFooter({text:'Soal 1/5'})],components:[mkRow(battleId,b.questions,0)]});
   }
   if (cid.startsWith('battle_decline_')) { battleSessions.delete(parseInt(cid.replace('battle_decline_',''))); return interaction.update({embeds:[new EmbedBuilder().setColor(0x95a5a6).setTitle('⚔️ Ditolak').setDescription('Tantangan ditolak.')],components:[]}); }
@@ -532,7 +550,7 @@ async function handleButton(interaction) {
     const isC=userId===b.challengerId; const isD=userId===b.challengedId;
     if (b.phase==='challenger_playing'&&!isC) return interaction.reply({content:'❌ Bukan giliranmu!',ephemeral:true});
     if (b.phase==='challenged_playing'&&!isD) return interaction.reply({content:'❌ Bukan giliranmu!',ephemeral:true});
-    const mkRow=(bId,qs,qi)=>new ActionRowBuilder().addComponents(qs[qi].options.map((opt,i)=>new ButtonBuilder().setCustomId(`ba_${bId}_${i}_${opt.correct?'c':'w'}`).setLabel(opt.label.slice(0,80)).setEmoji(['🅰️','🅱️','🅲','🅳'][i]).setStyle(ButtonStyle.Secondary)));
+    const mkRow=(bId,qs,qi)=>new ActionRowBuilder().addComponents(qs[qi].options.map((opt,i)=>new ButtonBuilder().setCustomId(`ba_${bId}_${i}_${opt.correct?'c':'w'}`).setLabel(opt.label.slice(0,80)).setEmoji(['1️⃣','2️⃣','3️⃣','4️⃣'][i]).setStyle(ButtonStyle.Secondary)));
     if (b.phase==='challenger_playing') {
       if(isCorrect) b.challengerScore++; b.currentQ++;
       if (b.currentQ>=5) {
@@ -567,7 +585,7 @@ async function handleButton(interaction) {
         return interaction.update({embeds:[new EmbedBuilder().setColor(sp.score>=8?0x2ecc71:0xe74c3c).setTitle('⚡ Speed Round Selesai!').addFields({name:'🎯 Skor',value:`${sp.score}/10`,inline:true},{name:'⏱️ Total',value:`${total.toFixed(1)}s`,inline:true},{name:'⏱️ Avg',value:`${avg.toFixed(1)}s`,inline:true},{name:'💰 XP',value:`+${xp}`,inline:true})],components:[]});
       }
       sp.questionStartTime=Date.now(); const q=sp.questions[sp.current];
-      return interaction.update({embeds:[new EmbedBuilder().setColor(0xff0000).setTitle(`⚡ Speed ${sp.current+1}/10`).setDescription(`${isCorrect?'✅':'❌'} (${elapsed.toFixed(1)}s)\n\n${q.question}`).setFooter({text:`Skor: ${sp.score} | Cepat = bonus XP!`})],components:[new ActionRowBuilder().addComponents(q.options.map((opt,i)=>new ButtonBuilder().setCustomId(opt.value).setLabel(opt.label.slice(0,80)).setEmoji(['🅰️','🅱️','🅲','🅳'][i]).setStyle(ButtonStyle.Secondary)))]});
+      return interaction.update({embeds:[new EmbedBuilder().setColor(0xff0000).setTitle(`⚡ Speed ${sp.current+1}/10`).setDescription(`${isCorrect?'✅':'❌'} (${elapsed.toFixed(1)}s)\n\n${q.question}`).setFooter({text:`Skor: ${sp.score} | Cepat = bonus XP!`})],components:[new ActionRowBuilder().addComponents(q.options.map((opt,i)=>new ButtonBuilder().setCustomId(opt.value).setLabel(opt.label.slice(0,80)).setEmoji(['1️⃣','2️⃣','3️⃣','4️⃣'][i]).setStyle(ButtonStyle.Secondary)))]});
     }
     const session=sessions.get(userId);
     if (!session||session.type==='susun') return interaction.reply({content:'❌ Sesi tidak ditemukan. /mulai untuk mulai',ephemeral:true});
@@ -595,7 +613,7 @@ async function handleButton(interaction) {
     const nextQ=session.questions[session.current];
     const resultMsg=isCorrect?'✅ **Benar!**':`❌ **Salah!** ${curQ.word.hanzi||''} = ${curQ.word.arti||''}`;
     const label=session.isReview?'🔄 Review':session.isTone?'🎵 Tone':session.isEmoji?'😃 Emoji':(()=>{const l=allLessonsN.find(l=>l.id===session.lessonId);return l?`U${l.unit}•${l.nama}`:'';})();
-    return interaction.update({embeds:[new EmbedBuilder().setColor(isCorrect?0x2ecc71:0xe74c3c).setTitle(`📝 Soal ${session.current+1}/${session.questions.length}`).setDescription(`${resultMsg}\n\n${nextQ.question}`).setFooter({text:`${heartsDisplay(hearts)} | Skor: ${session.score} | ${label}`})],components:[new ActionRowBuilder().addComponents(nextQ.options.map((opt,i)=>new ButtonBuilder().setCustomId(opt.value).setLabel(opt.label.slice(0,80)).setEmoji(['🅰️','🅱️','🅲','🅳'][i]).setStyle(ButtonStyle.Secondary)))]});
+    return interaction.update({embeds:[new EmbedBuilder().setColor(isCorrect?0x2ecc71:0xe74c3c).setTitle(`📝 Soal ${session.current+1}/${session.questions.length}`).setDescription(`${resultMsg}\n\n${nextQ.question}`).setFooter({text:`${heartsDisplay(hearts)} | Skor: ${session.score} | ${label}`})],components:[new ActionRowBuilder().addComponents(nextQ.options.map((opt,i)=>new ButtonBuilder().setCustomId(opt.value).setLabel(opt.label.slice(0,80)).setEmoji(['1️⃣','2️⃣','3️⃣','4️⃣'][i]).setStyle(ButtonStyle.Secondary)))]});
   }
 }
 
