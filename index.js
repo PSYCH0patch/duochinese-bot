@@ -48,6 +48,7 @@ const allChallengesN = allChallenges.map(normalizeChallenge);
 const allTonesN     = allTones.map(normalizeTone);
 
 const { shuffle, getLevel, xpBar, heartsDisplay, similarity, todayStr, generateWordSearchGrid, renderGrid, getWeakWords, getReviewWords, nextReviewDate, getDailyReward } = require('./utils/helpers');
+const { checkAndRunResets } = require('./utils/leaderboardReset');
 const { getTitle } = require('./config/titles');
 const { STREAK_REWARDS } = require('./config/streakRewards');
 const { runNotifications, sendNotif } = require('./utils/notifier');
@@ -1594,6 +1595,16 @@ client.once('clientReady', () => {
   setInterval(() => {
     cleanupStaleMaps();
   }, 5 * 60 * 1000);
+
+  // Leaderboard reset check every 5 minutes
+  setInterval(() => {
+    checkAndRunResets(client, db);
+  }, 5 * 60 * 1000);
+
+  // Run once on startup
+  setTimeout(() => {
+    checkAndRunResets(client, db);
+  }, 15000);
 
   setInterval(() => {
     runNotifications(client, db).catch(err => console.error('Notif error:', err));

@@ -131,7 +131,7 @@ function loadData(relPath) {
     check('DB has >= 1 user', users >= 1, `got ${users}`);
 
     const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map(r => r.name);
-    const requiredTables = ['users', 'user_words', 'user_badges', 'user_lessons', 'user_challenges', 'battles', 'words', 'server_xp', 'daily_logins', 'purchases', 'weekly_stats', 'notifications'];
+    const requiredTables = ['users', 'user_words', 'user_badges', 'user_lessons', 'user_challenges', 'battles', 'words', 'server_xp', 'daily_logins', 'purchases', 'weekly_stats', 'notifications', 'leaderboard_seasons', 'season_snapshots', 'pair_sessions', 'flashcard_sessions'];
     for (const t of requiredTables) {
       check(`Table exists: ${t}`, tables.includes(t));
     }
@@ -224,6 +224,7 @@ function loadData(relPath) {
   check('roleSync.js exists', fs.existsSync(path.join(__dirname, '../utils/roleSync.js')));
   check('backup.js exists', fs.existsSync(path.join(__dirname, '../utils/backup.js')));
   check('notifier.js exists', fs.existsSync(path.join(__dirname, '../utils/notifier.js')));
+  check('leaderboardReset.js exists', fs.existsSync(path.join(__dirname, '../utils/leaderboardReset.js')));
 
   console.log('\n======================================');
   for (const line of results) console.log(line);
