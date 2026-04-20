@@ -224,6 +224,30 @@ function getAdaptiveReviewQueue(userId, limit=8) {
   };
 }
 
+
+function getAdaptiveLessonWords(userId, lessonWords, isBoss=false) {
+  let baseWords = shuffle(isBoss ? lessonWords : lessonWords.slice(0,5));
+  let injectedWeak = 0;
+
+  if (!isBoss) {
+    const weak = getWeakWords(db, userId, 4);
+    const weakWordObjs = weak
+      .map(w => allWords.find(aw => aw.id === w.word_id))
+      .filter(Boolean)
+      .filter(w => !baseWords.find(bw => bw.id === w.id));
+
+    const injectCount = Math.min(weakWordObjs.length, 2);
+    if (injectCount > 0) {
+      const injected = weakWordObjs.slice(0, injectCount);
+      const mid = Math.floor(baseWords.length / 2);
+      baseWords = [...baseWords.slice(0, mid), ...injected, ...baseWords.slice(mid)];
+      injectedWeak = injectCount;
+    }
+  }
+
+  return { words: baseWords, injectedWeak };
+}
+
 async function handleMulai(interaction) {
   const userId=interaction.user.id;
   ensureUser(userId,interaction.user.username); updateStreak(userId);
@@ -240,42 +264,33 @@ async function handleMulai(interaction) {
   await interaction.reply({embeds:[embed],components:[row]});
 }
 
+
 async function handleLanjut(interaction) {
   const userId=interaction.user.id;
   const user=ensureUser(userId,interaction.user.username); updateStreak(userId);
   const hearts=checkHearts(userId);
   if (hearts<=0) return interaction.reply({content:`💔 Nyawa habis!\n${heartsDisplay(0)}`,ephemeral:true});
+
   const lesson=allLessonsN.find(l=>l.id===(user.current_lesson||1))||allLessonsN[0];
   if (!lesson) return interaction.reply({content:'🎉 Semua lesson selesai!',ephemeral:true});
+
   const lessonWords=lesson.wordIds.map(id=>allWords.find(w=>w.id===id)).filter(Boolean);
   if (!lessonWords.length) return interaction.reply({content:'❌ Tidak ada kata.',ephemeral:true});
 
-  let baseWords = shuffle(lesson.isBoss ? lessonWords : lessonWords.slice(0,5));
+  const adaptive = getAdaptiveLessonWords(userId, lessonWords, lesson.isBoss);
+  const qs = adaptive.words.map(w=>generateQuestion(w,allWords));
 
-  // === ADAPTIVE v3: selipkan kata lemah ===
-  let injectedWeak = 0;
-  if (!lesson.isBoss) {
-    const weak = getWeakWords(db, userId, 3);
-    const weakWordObjs = weak
-      .map(w => allWords.find(aw => aw.id === w.word_id))
-      .filter(Boolean)
-      .filter(w => !baseWords.find(bw => bw.id === w.id)); // jangan duplikat
+  sessions.set(userId,{
+    lessonId:lesson.id,
+    questions:qs,
+    current:0,
+    score:0,
+    startTime:Date.now(),
+    guildId:interaction.guildId
+  });
 
-    const injectCount = Math.min(weakWordObjs.length, 2); // max 2 kata lemah
-    if (injectCount > 0) {
-      const injected = weakWordObjs.slice(0, injectCount);
-      // Selipkan di tengah, bukan di depan/belakang
-      const mid = Math.floor(baseWords.length / 2);
-      baseWords = [...baseWords.slice(0, mid), ...injected, ...baseWords.slice(mid)];
-      injectedWeak = injectCount;
-    }
-  }
-
-  const qs = baseWords.map(w => generateQuestion(w, allWords));
-  sessions.set(userId,{lessonId:lesson.id,questions:qs,current:0,score:0,startTime:Date.now(),guildId:interaction.guildId});
-
-  const label = injectedWeak > 0
-    ? `Unit ${lesson.unit} • ${lesson.nama} (+${injectedWeak} review)`
+  const label = adaptive.injectedWeak > 0
+    ? `Unit ${lesson.unit} • ${lesson.nama} (+${adaptive.injectedWeak} review)`
     : `Unit ${lesson.unit} • ${lesson.nama}`;
 
   const {embed,row}=buildUI(qs[0],1,qs.length,hearts,label);
@@ -588,7 +603,7 @@ async function handleBattle(interaction) {
   const qs=shuffle(allWords).slice(0,5).map(w=>generateQuestion(w,allWords));
   const res=db.prepare("INSERT INTO battles (challenger_id,challenged_id,total_q,questions,status) VALUES (?,?,5,?,'pending')").run(userId,target.id,JSON.stringify(qs));
   const battleId=res.lastInsertRowid;
-  battleSessions.set(battleId,{id:battleId,challengerId:userId,challengedId:target.id,questions:qs,challengerScore:0,challengedScore:0,phase:'waiting',currentQ:0});
+  battleSessions.set(battleId,{id:battleId,challengerId:userId,challengedId:target.id,questions:qs,challengerScore:0,challengedScore:0,phase:'waiting',currentQ:0,createdAt:Date.now()});
   await interaction.reply({embeds:[new EmbedBuilder().setColor(0xe74c3c).setTitle('⚔️ Battle Challenge!').setDescription(`**${interaction.user.username}** vs **${target.username}**\n5 soal! Pemenang +50 XP!`).setFooter({text:`Battle #${battleId}`})],
     components:[new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId(`battle_accept_${battleId}`).setLabel('✅ Terima').setStyle(ButtonStyle.Success),new ButtonBuilder().setCustomId(`battle_decline_${battleId}`).setLabel('❌ Tolak').setStyle(ButtonStyle.Danger))]});
 }
@@ -769,6 +784,57 @@ async function handleModal(interaction) {
   }
 }
 
+
+function cleanupStaleMaps() {
+  const now = Date.now();
+  const limits = {
+    sessions: 30 * 60 * 1000,
+    battle: 20 * 60 * 1000,
+    wordsearch: 20 * 60 * 1000,
+    speed: 15 * 60 * 1000,
+  };
+
+  let cleaned = { sessions: 0, battles: 0, wordsearch: 0, speed: 0 };
+
+  for (const [key, value] of sessions.entries()) {
+    const ts = value?.startTime || 0;
+    if (ts && (now - ts > limits.sessions)) {
+      sessions.delete(key);
+      cleaned.sessions++;
+    }
+  }
+
+  for (const [key, value] of battleSessions.entries()) {
+    const ts = value?.createdAt || 0;
+    if (ts && (now - ts > limits.battle)) {
+      battleSessions.delete(key);
+      cleaned.battles++;
+    }
+  }
+
+  for (const [key, value] of wordsearchSessions.entries()) {
+    const ts = value?.startTime || 0;
+    if (ts && (now - ts > limits.wordsearch)) {
+      wordsearchSessions.delete(key);
+      cleaned.wordsearch++;
+    }
+  }
+
+  for (const [key, value] of speedSessions.entries()) {
+    const ts = value?.startTime || 0;
+    if (ts && (now - ts > limits.speed)) {
+      speedSessions.delete(key);
+      cleaned.speed++;
+    }
+  }
+
+  const total = cleaned.sessions + cleaned.battles + cleaned.wordsearch + cleaned.speed;
+  if (total > 0) {
+    console.log(`🧹 Cleaned stale sessions: lesson=${cleaned.sessions}, battle=${cleaned.battles}, wordsearch=${cleaned.wordsearch}, speed=${cleaned.speed}`);
+  }
+}
+
+
 client.once('clientReady', () => {
   console.log(`✅ ${client.user.tag} online!`);
   console.log(`📊 Words: ${allWords.length} | Lessons: ${allLessonsN.length} | Grammar: ${allGrammarN.length} | Badges: ${allBadges.length} | Tones: ${allTonesN.length}`);
@@ -780,6 +846,10 @@ client.once('clientReady', () => {
       client.channels.cache.get(u.reminder_channel)?.send(`⏰ <@${u.user_id}> Waktunya belajar! /lanjut atau /review 📚`).catch(()=>{});
     });
   },60000);
+
+  setInterval(() => {
+    cleanupStaleMaps();
+  }, 5 * 60 * 1000);
 });
 
 client.on('interactionCreate', async (interaction) => {
