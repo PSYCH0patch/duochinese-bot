@@ -173,7 +173,7 @@ function checkAndAwardBadges(userId) {
         .setColor(0xf39c12)
         .setTitle('🏅 Badge Baru!')
         .setDescription('Kamu mendapatkan badge baru!\n\n' + badgeNames)
-        .setFooter({ text: 'DuoChinese • Achievement unlocked!' })
+        .setFooter({ text: 'DuoLingCord • Achievement unlocked!' })
       ).catch(() => {});
     }
   }
@@ -245,7 +245,7 @@ async function finishSession(userId, session, interaction) {
       .setColor(0xf1c40f)
       .setTitle('🎉 Level Naik!')
       .setDescription('Selamat! Kamu naik ke **' + lvlInfo.nama + '**!\n\nTerus semangat belajar! 🚀')
-      .setFooter({ text: 'DuoChinese • Level up!' })
+      .setFooter({ text: 'DuoLingCord • Level up!' })
     ).catch(() => {});
   }
 
@@ -894,7 +894,7 @@ async function handleDbStats(interaction) {
       { name: '🏅 Badges Earned',   value: String(totalBadges),  inline: true },
       { name: '🏆 Top 5',           value: topUsers.length ? topUsers.map((u,i) => (i+1) + '. ' + u.username + ' — ' + u.xp + ' XP 🔥' + u.streak).join('\n') : '-', inline: false },
     )
-    .setFooter({ text: 'DuoChinese Bot | ' + new Date().toLocaleString('id-ID') })] });
+    .setFooter({ text: 'DuoLingCord | ' + new Date().toLocaleString('id-ID') })] });
 }
 
 async function handleBotInfo(interaction) {
@@ -1154,7 +1154,7 @@ async function handleProgress(interaction) {
       { name: '🏅 Badge', value: badgeCount + '/' + allBadges.length, inline: true },
       { name: '📊 Progress Per Unit', value: unitBars, inline: false },
     )
-    .setFooter({ text: 'DuoChinese Bot • /progress' });
+    .setFooter({ text: 'DuoLingCord • /progress' });
 
   await interaction.reply({ embeds: [embed] });
 }
@@ -1621,7 +1621,7 @@ client.once('clientReady', () => {
           .setColor(0x9b59b6).setTitle('📅 Kata Hari Ini')
           .setDescription('# ' + dayWord.hanzi + '\n\n**' + dayWord.pinyin + '** — ' + dayWord.arti)
           .addFields({ name: '📝 Contoh', value: dayWord.contoh + '\n*' + dayWord.contoh_arti + '*' })
-          .setFooter({ text: 'Gunakan /daily untuk klaim XP harian!' })
+          .setFooter({ text: 'DuoLingCord • Gunakan /daily untuk klaim XP harian!' })
         ] }).catch(() => {});
       }
     }

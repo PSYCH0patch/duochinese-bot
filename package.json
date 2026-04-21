@@ -1,5 +1,5 @@
 {
-  "name": "duochinese-bot",
+  "name": "duolingcord",
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
@@ -13,5 +13,5 @@
     "discord.js": "^14.26.3",
     "dotenv": "^17.4.2"
   },
-  "description": ""
+  "description": "DuoLingCord — Belajar Mandarin di Discord"
 }

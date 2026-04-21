@@ -196,8 +196,8 @@ function loadData(relPath) {
   try {
     const pm2Raw = execSync('pm2 jlist 2>/dev/null', { encoding: 'utf8' });
     const list = JSON.parse(pm2Raw);
-    const app = list.find(p => p.name === 'duochinese');
-    check('PM2 app exists', !!app);
+    const app = list.find(p => p.name === 'duolingcord');
+    check('PM2 app exists (duolingcord)', !!app);
     check('PM2 status online', app && app.pm2_env && app.pm2_env.status === 'online', app?.pm2_env?.status || 'not found');
   } catch (e) {
     warn('PM2 check failed', e.message);
